@@ -1,0 +1,454 @@
+/* Preferans — card-salon look: dark felt table, aged-paper score sheet. */
+
+:root {
+  --felt: #1f4230;
+  --felt-dark: #16301f;
+  --felt-line: #2d5741;
+  --paper: #f0e7d0;
+  --paper-dim: #e4d9bc;
+  --ink: #2b241a;
+  --ink-soft: #6b6049;
+  --brass: #c9a35a;
+  --brass-dim: #8f7440;
+  --card-face: #fcfaf3;
+  --red: #b23c2e;
+  --black: #23201b;
+  --good: #3f7d4e;
+  --shadow: 0 2px 10px rgba(0, 0, 0, .45);
+  --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--serif);
+  color: var(--paper);
+  background:
+    radial-gradient(ellipse at 50% 30%, var(--felt) 0%, var(--felt-dark) 90%);
+  min-height: 100vh;
+}
+
+/* Card size follows the window height so the whole table fits on screen. */
+:root {
+  --card-h: min(260px, 28vh);
+  --card-w: calc(var(--card-h) * 0.708);
+}
+
+/* In-game: a fixed full-viewport column — the page itself never scrolls. */
+body.in-game { height: 100vh; height: 100svh; overflow: hidden; }
+body.in-game #app { display: flex; flex-direction: column; height: 100%; }
+
+button { font-family: var(--serif); cursor: pointer; }
+button:disabled { cursor: default; }
+button:focus-visible, .card:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+/* ------------------------------------------------------------------ header */
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--felt-line);
+  flex-wrap: wrap;
+}
+
+header h1 {
+  font-size: 20px;
+  margin: 0;
+  letter-spacing: .35em;
+  font-weight: normal;
+  color: var(--brass);
+  text-transform: uppercase;
+}
+header h1 .pip { letter-spacing: 0; }
+
+.chips { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.chip { font-size: 14px; color: var(--paper-dim); font-style: italic; }
+.chip b { color: var(--paper); font-style: normal; }
+
+header .spacer { flex: 1; }
+
+.hbtn {
+  background: none;
+  border: 1px solid var(--brass-dim);
+  color: var(--brass);
+  padding: 4px 14px;
+  font-size: 14px;
+  border-radius: 3px;
+  letter-spacing: .08em;
+}
+.hbtn:hover { border-color: var(--brass); background: rgba(201, 163, 90, .08); }
+
+/* -------------------------------------------------------------------- home */
+
+.home {
+  max-width: 520px;
+  margin: 8vh auto;
+  padding: 0 20px;
+}
+.home h1 {
+  font-size: 42px;
+  letter-spacing: .3em;
+  font-weight: normal;
+  color: var(--brass);
+  text-align: center;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.home .sub {
+  text-align: center;
+  font-style: italic;
+  color: var(--paper-dim);
+  margin: 0 0 40px;
+}
+.home form { display: flex; flex-direction: column; gap: 22px; }
+.home label.head { letter-spacing: .15em; text-transform: uppercase; font-size: 13px; color: var(--brass); }
+
+.variant-row { display: flex; flex-direction: column; gap: 8px; }
+.variant-opt {
+  display: flex; gap: 10px; align-items: baseline;
+  border: 1px solid var(--felt-line);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+.variant-opt:hover { border-color: var(--brass-dim); }
+.variant-opt input { accent-color: var(--brass); }
+.variant-opt b { font-size: 16px; }
+.variant-opt span { color: var(--paper-dim); font-size: 13.5px; font-style: italic; }
+
+.home input[type=number] {
+  font-family: var(--serif);
+  font-size: 18px;
+  width: 110px;
+  background: var(--felt-dark);
+  color: var(--paper);
+  border: 1px solid var(--felt-line);
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+
+.primary {
+  background: var(--brass);
+  color: var(--felt-dark);
+  border: none;
+  font-size: 17px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 12px;
+  border-radius: 4px;
+}
+.primary:hover { filter: brightness(1.07); }
+.primary:disabled { opacity: .5; }
+
+/* -------------------------------------------------------------------- join */
+
+.join { max-width: 400px; margin: 14vh auto; padding: 0 20px; text-align: center; }
+.join h2 { letter-spacing: .2em; font-weight: normal; color: var(--brass); text-transform: uppercase; }
+.join input {
+  font-family: var(--serif); font-size: 18px; width: 100%;
+  background: var(--felt-dark); color: var(--paper);
+  border: 1px solid var(--felt-line); border-radius: 4px;
+  padding: 10px 12px; margin: 14px 0; text-align: center;
+}
+
+/* ------------------------------------------------------------------- table */
+
+.table-wrap {
+  max-width: 1560px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 14px 8px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.opponents { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; flex: none; }
+
+.seat {
+  border: 1px solid var(--felt-line);
+  border-radius: 6px;
+  padding: 8px 14px;
+  min-width: 190px;
+  background: rgba(0, 0, 0, .18);
+}
+.seat.turn { border-color: var(--brass); box-shadow: 0 0 12px rgba(201, 163, 90, .35); }
+.seat .nm { font-size: 17px; display: flex; align-items: baseline; gap: 8px; }
+.seat .dot { width: 8px; height: 8px; border-radius: 50%; background: #777; display: inline-block; flex: none; align-self: center; }
+.seat .dot.on { background: var(--good); }
+.seat .sub { font-size: 13px; color: var(--paper-dim); font-style: italic; min-height: 18px; }
+.seat .word { color: var(--brass); font-style: normal; }
+.badge {
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  border: 1px solid var(--brass-dim); color: var(--brass);
+  border-radius: 3px; padding: 0 5px;
+}
+.seat .cardsback { color: var(--paper-dim); font-size: 12px; }
+
+/* open hand (misère) */
+.open-hand { display: flex; gap: 3px; margin-top: 6px; flex-wrap: wrap; }
+.open-hand .mini-card { width: 60px; }
+
+/* ------------------------------------------------------------------ center */
+
+.center {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+/* Center vertically when there is room, scroll from the top when there isn't. */
+.center > :first-child { margin-top: auto; }
+.center > :last-child { margin-bottom: auto; }
+
+.status { font-size: 18px; font-style: italic; color: var(--paper); text-align: center; flex: none; }
+.status b { color: var(--brass); font-style: normal; }
+
+.contract-line { font-size: 15px; color: var(--paper-dim); }
+.contract-line b { color: var(--brass); font-size: 18px; }
+
+.talon { display: flex; gap: 10px; align-items: center; }
+.talon .lbl { font-size: 13px; letter-spacing: .15em; text-transform: uppercase; color: var(--paper-dim); }
+
+.trick { display: flex; gap: 26px; align-items: flex-end; flex: none; }
+.trick .slot { text-align: center; }
+.trick .slot .who { font-size: 13px; color: var(--paper-dim); margin-top: 6px; font-style: italic; }
+.trick .empty {
+  width: var(--card-w); height: var(--card-h);
+  border: 1px dashed var(--felt-line); border-radius: 5px;
+}
+
+/* Talon cards are informational — draw them a bit smaller. */
+.talon .card { width: calc(var(--card-w) * 0.58); height: calc(var(--card-h) * 0.58); }
+
+.last-trick { font-size: 13px; color: var(--paper-dim); font-style: italic; display: flex; align-items: center; gap: 4px; }
+
+.mini-card {
+  width: 52px;
+  border-radius: 2px;
+  background: var(--card-face);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .4);
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------- cards */
+
+.card {
+  display: inline-block;
+  width: var(--card-w); height: var(--card-h);
+  background: var(--card-face);
+  border-radius: 5px;
+  border: none;
+  box-shadow: var(--shadow);
+  padding: 0;
+  line-height: 0;
+  user-select: none;
+  overflow: hidden;
+}
+.card img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+.hand { display: flex; justify-content: center; flex-wrap: wrap; gap: 0; padding: 26px 0 4px; flex: none; }
+.hand .card { margin-right: calc(var(--card-w) * -0.37); transition: transform .12s; }
+.hand .card:last-child { margin-right: 0; }
+button.card { cursor: default; }
+button.card.playable { cursor: pointer; }
+button.card.playable:hover { transform: translateY(-22px); }
+/* Playable cards pop out automatically when some cards are not playable. */
+button.card.raise { transform: translateY(-16px); }
+button.card.raise:hover { transform: translateY(-26px); }
+button.card.sel { transform: translateY(-28px); box-shadow: 0 0 0 3px var(--brass), var(--shadow); }
+.talon .card.talon-active { box-shadow: 0 0 0 3px var(--brass), var(--shadow); }
+
+.myseat { display: flex; justify-content: center; gap: 12px; align-items: baseline; margin-top: 2px; flex: none; }
+.myseat .nm { font-size: 17px; color: var(--brass); }
+.myseat .sub { font-size: 13px; color: var(--paper-dim); font-style: italic; }
+
+/* ----------------------------------------------------------------- actions */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.bid-grid { display: grid; grid-template-columns: repeat(5, 58px); gap: 4px; }
+.bid-grid button, .abtn {
+  font-family: var(--serif);
+  font-size: 15px;
+  padding: 4px 0;
+  border-radius: 4px;
+  border: 1px solid var(--brass-dim);
+  background: rgba(0, 0, 0, .25);
+  color: var(--paper);
+}
+.bid-grid button.redsuit { color: #e8917f; }
+.bid-grid button:not(:disabled):hover, .abtn:not(:disabled):hover {
+  border-color: var(--brass); background: rgba(201, 163, 90, .15);
+}
+.bid-grid button:disabled { opacity: .22; border-color: var(--felt-line); }
+
+.abtn { padding: 7px 22px; letter-spacing: .05em; }
+.abtn.warn { color: #e8917f; border-color: #8f5040; }
+.action-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+.hint { font-size: 13.5px; color: var(--paper-dim); font-style: italic; text-align: center; }
+
+/* share box */
+.share {
+  display: flex; gap: 8px; align-items: center;
+  background: rgba(0, 0, 0, .25);
+  border: 1px solid var(--felt-line);
+  border-radius: 4px; padding: 8px 12px;
+}
+.share code { font-size: 14px; color: var(--paper); }
+
+/* ------------------------------------------------------- paper score sheet */
+
+dialog {
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  max-width: min(92vw, 700px);
+  width: auto;
+}
+dialog::backdrop { background: rgba(10, 20, 14, .75); }
+
+.sheet {
+  background:
+    repeating-linear-gradient(0deg, transparent 0 27px, rgba(43, 36, 26, .08) 27px 28px),
+    var(--paper);
+  color: var(--ink);
+  padding: 26px 30px 22px;
+  border-radius: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .6);
+}
+.sheet h3 {
+  margin: 0 0 4px;
+  font-weight: normal;
+  letter-spacing: .25em;
+  text-transform: uppercase;
+  font-size: 16px;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 6px;
+}
+.sheet .meta { font-size: 13px; font-style: italic; color: var(--ink-soft); margin-bottom: 12px; }
+
+.sheet table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.sheet th, .sheet td { padding: 5px 10px; text-align: right; border-bottom: 1px solid rgba(43, 36, 26, .25); }
+.sheet th { font-weight: normal; font-style: italic; color: var(--ink-soft); text-align: right; }
+.sheet th:first-child, .sheet td:first-child { text-align: left; }
+.sheet td.tot { font-weight: bold; }
+.sheet td.pos { color: var(--good); }
+.sheet td.neg { color: var(--red); }
+
+/* the pulya drawing */
+.pulya { display: block; width: 100%; height: auto; margin: 6px 0 2px; }
+.pulya .pen {
+  fill: #2c3a6b; /* ballpoint blue */
+  font-family: 'Bradley Hand', 'Segoe Print', 'Comic Sans MS', cursive;
+}
+.pulya .pen.big { font-weight: bold; }
+.pulya .pname {
+  fill: var(--ink);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+}
+.pulya .pname.me { fill: #7a5c1e; }
+.pulya .plbl {
+  fill: var(--ink-soft);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 9.5px;
+}
+.pulya .bandlbl {
+  fill: rgba(43, 36, 26, .3);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.sheet table.totals { margin-top: 10px; }
+
+.sheet .foot { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap; }
+.sheet .foot button {
+  background: none; border: 1px solid var(--ink-soft); color: var(--ink);
+  border-radius: 3px; padding: 5px 14px; font-size: 14px;
+}
+.sheet .foot button:hover { border-color: var(--ink); }
+.sheet .foot button.voted { background: var(--ink); color: var(--paper); }
+
+.sheet ul { margin: 8px 0; padding-left: 20px; font-size: 14.5px; }
+.sheet li { margin: 3px 0; }
+
+.summary-panel {
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 4px;
+  padding: 14px 22px;
+  max-width: 560px;
+  box-shadow: var(--shadow);
+  font-size: 15px;
+}
+.summary-panel .t { font-style: italic; color: var(--ink-soft); font-size: 13px; letter-spacing: .1em; text-transform: uppercase; }
+.summary-panel div { margin: 2px 0; }
+
+/* --------------------------------------------------------------------- log */
+
+.log-lines { font-size: 14.5px; margin-top: 6px; max-height: 60vh; overflow-y: auto; }
+.log-lines div { padding: 2px 0; border-bottom: 1px solid rgba(43, 36, 26, .12); }
+
+/* ------------------------------------------------------------------- toast */
+
+#toast {
+  position: fixed;
+  bottom: 24px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 8px 18px;
+  border-radius: 4px;
+  font-family: var(--serif);
+  font-style: italic;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s;
+  z-index: 50;
+}
+#toast.show { opacity: 1; }
+
+/* ------------------------------------------------------------------ mobile */
+
+@media (max-width: 700px) {
+  :root { --card-h: min(150px, 20vh); }
+  body.in-game { height: auto; overflow: auto; } /* phones: allow scrolling */
+  .opponents { flex-direction: row; }
+  .seat { min-width: 0; flex: 1; padding: 6px 8px; }
+  .seat .nm { font-size: 14px; }
+  .hand .card { margin-right: calc(var(--card-w) * -0.62); }
+  .trick { gap: 12px; }
+  .mini-card { width: 36px; }
+  .bid-grid { grid-template-columns: repeat(5, 52px); }
+  header h1 { letter-spacing: .2em; font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand .card, #toast { transition: none; }
+}

@@ -394,6 +394,35 @@ function startPlay(g) {
   // are exposed right after the discard; otherwise after the declarer's
   // first card (handled in actPlay).
   if (c.misere && fh !== g.declarer) g.play.misereOpen = true;
+  // Misère is caught by one leader: once the cards open, the defenders agree
+  // on who plays both hands ("играю") and who trusts ("доверяю").
+  if (c.misere) g.play.mctl = { choices: {}, leader: null, passive: null, conflict: null };
+}
+
+function actMisereRole(g, seat, a) {
+  const p = g.play;
+  const m = p && p.mctl;
+  if (!g.contract.misere || !m) throw err('Сейчас нет розыгрыша мизера');
+  if (!p.misereOpen) throw err('Карты ещё не открыты');
+  if (m.leader !== null) throw err('Роли уже распределены');
+  if (seat === g.declarer) throw err('Роли выбирают вистующие');
+  if (a.role !== 'play' && a.role !== 'trust') throw err('Некорректный выбор');
+  m.choices[seat] = a.role;
+  m.conflict = null;
+  g.lastWords[seat] = a.role === 'play' ? 'играю' : 'доверяю';
+  log(g, `${pname(g, seat)}: ${a.role === 'play' ? 'играю' : 'доверяю'}`);
+  const d1 = (g.declarer + 1) % 3;
+  const d2 = (g.declarer + 2) % 3;
+  if (!m.choices[d1] || !m.choices[d2]) return;
+  if (m.choices[d1] === m.choices[d2]) {
+    m.conflict = m.choices[d1];
+    m.choices = {};
+    log(g, 'Оба выбрали одно и то же — один должен играть, второй довериться. Выберите заново');
+    return;
+  }
+  m.leader = m.choices[d1] === 'play' ? d1 : d2;
+  m.passive = m.leader === d1 ? d2 : d1;
+  log(g, `${pname(g, m.leader)} руководит розыгрышем мизера, ${pname(g, m.passive)} доверяет`);
 }
 
 // Raspasy: for the first two tricks the talon card, revealed one per trick,
@@ -484,6 +513,17 @@ function actPlay(g, actorSeat, a) {
   // In light whist the whister plays the passer's cards too.
   if (p.light && actorSeat === p.light.whister && p.turn === p.light.passer) {
     seat = p.light.passer;
+  }
+  // On open misère the leading defender plays both defensive hands.
+  const m = g.contract.misere ? p.mctl : null;
+  if (m && m.leader !== null && actorSeat === m.leader && p.turn === m.passive) {
+    seat = m.passive;
+  }
+  if (m && p.misereOpen && m.leader === null && actorSeat !== g.declarer) {
+    throw err('Сначала решите, кто руководит розыгрышем: «играю» или «доверяю»');
+  }
+  if (m && m.leader !== null && actorSeat === m.passive) {
+    throw err('Вы доверили розыгрыш партнёру');
   }
   if (seat !== p.turn) throw err('Сейчас не ваш ход');
   if (p.light && actorSeat === p.light.passer) throw err('В светлую за вас ходит вистующий');
@@ -690,6 +730,7 @@ function act(g, seat, a) {
     case 'play':
       if (a.type === 'claim') { actClaim(g, seat); return; }
       if (a.type === 'claimReply') { actClaimReply(g, seat, a); return; }
+      if (a.type === 'misereRole') { actMisereRole(g, seat, a); return; }
       if (a.type !== 'play') throw err('Ждём хода картой');
       if (g.claim) throw err('Сначала ответьте на предложение завершить розыгрыш');
       actPlay(g, seat, a); return;
@@ -776,8 +817,14 @@ function view(g, seat, connected) {
 
   if (g.phase === 'play') {
     const p = g.play;
-    // In light whist the whister acts for the passer's turn as well.
-    const controller = (p.light && p.turn === p.light.passer) ? p.light.whister : p.turn;
+    // In light whist the whister acts for the passer's turn as well;
+    // on open misère the leading defender acts for the trusting one.
+    let controller = p.turn;
+    if (p.light && p.turn === p.light.passer) controller = p.light.whister;
+    const m = c.misere ? p.mctl : null;
+    if (m && m.leader !== null && p.turn === m.passive) controller = m.leader;
+    // Until misère roles are settled, the defenders cannot play.
+    if (m && m.leader === null && p.misereOpen && p.turn !== g.declarer) controller = -1;
     out.play = {
       turn: p.turn,
       trick: p.trick,
@@ -788,6 +835,7 @@ function view(g, seat, connected) {
       legal: seat === controller ? legalPlays(g, p.turn) : null,
       actingFor: (seat === controller && controller !== p.turn) ? p.turn : null,
       light: p.light,
+      mctl: m && m.leader !== null ? { leader: m.leader, passive: m.passive } : null,
       whistDecisions: g.whisting ? g.whisting.decisions : null,
       whistNeed: c && c.level ? WHIST_NEED[c.level] : null,
     };
@@ -804,6 +852,22 @@ function view(g, seat, connected) {
     }
     if (c.misere && p.misereOpen && seat !== g.declarer) {
       out.openHands[g.declarer] = sortHand(g.hands[g.declarer]);
+    }
+    if (m && p.misereOpen && m.leader === null) {
+      out.misereRoles = {
+        yourChoice: seat !== g.declarer && seat >= 0 && !m.choices[seat],
+        waiting: seat !== g.declarer && !!m.choices[seat],
+        conflict: m.conflict,
+      };
+    }
+    // Once misère roles are settled, the defenders see each other's cards:
+    // the leader plays the trusting partner's hand, the trusting partner
+    // watches the whole position.
+    if (m && m.leader !== null && seat === m.leader) {
+      out.openHands[m.passive] = sortHand(g.hands[m.passive]);
+    }
+    if (m && m.leader !== null && seat === m.passive) {
+      out.openHands[m.leader] = sortHand(g.hands[m.leader]);
     }
     if (p.light) {
       // Light whist: both defenders' cards lie open for everyone.

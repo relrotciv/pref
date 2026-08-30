@@ -444,7 +444,18 @@ function renderCenter() {
     }
     html += renderTrick();
     let playStatus;
-    if (s.claim) {
+    if (s.misereRoles) {
+      const conflictNote = s.misereRoles.conflict
+        ? '<b>Оба выбрали одно и то же</b> — один должен играть, второй довериться. '
+        : '';
+      if (s.misereRoles.yourChoice) {
+        playStatus = `${conflictNote}Мизер открыт. Кто руководит розыгрышем — <b>вы решаете</b>: играю или доверяю?`;
+      } else if (s.misereRoles.waiting) {
+        playStatus = `${conflictNote}Ждём решения партнёра…`;
+      } else {
+        playStatus = `${conflictNote}Вистующие решают, кто руководит розыгрышем…`;
+      }
+    } else if (s.claim) {
       const word = s.claim.misere ? '«нет взяток»' : '«все мои»';
       playStatus = s.claim.yourReply
         ? `<b>${youName(s.claim.by)}</b> говорит ${word}. Завершить розыгрыш?`
@@ -453,6 +464,8 @@ function renderCenter() {
       playStatus = `<b>Ваш ход из открытой руки</b> (${esc(name(s.play.actingFor))}).`;
     } else if (s.play.light && s.play.light.passer === s.you && turn === s.you) {
       playStatus = `Вист в светлую: за вас ходит <b>${esc(name(s.play.light.whister))}</b>…`;
+    } else if (s.play.mctl && s.play.mctl.passive === s.you && turn === s.you) {
+      playStatus = `За вас ходит <b>${esc(name(s.play.mctl.leader))}</b> — вы доверили розыгрыш…`;
     } else if (yourTurn) {
       playStatus = '<b>Ваш ход.</b>';
     } else {
@@ -591,6 +604,16 @@ function renderActions() {
     </div>`));
     a.querySelectorAll('[data-light]').forEach((b) => {
       b.onclick = () => act({ type: 'lightChoice', open: b.dataset.light === '1' });
+    });
+  }
+
+  if (s.phase === 'play' && s.misereRoles && s.misereRoles.yourChoice) {
+    a.appendChild(el(`<div class="action-row">
+      <button class="abtn" data-mrole="play">Играю</button>
+      <button class="abtn" data-mrole="trust">Доверяю</button>
+    </div>`));
+    a.querySelectorAll('[data-mrole]').forEach((b) => {
+      b.onclick = () => act({ type: 'misereRole', role: b.dataset.mrole });
     });
   }
 
@@ -861,7 +884,7 @@ function openRules() {
         <li><b>Торговля:</b> от 6♠ до 10БК; мизер стоит между 8БК и 9♠ и может быть только первым словом. Старшая рука может держать равную заявку.</li>
         <li><b>Распасы (розыгрыш):</b> карты прикупа открываются по одной; в первых двух взятках ходом считается карта прикупа — все обязаны класть её масть (при отсутствии — любую), взятку берёт старшая карта масти прикупа.</li>
         <li><b>Светлая/тёмная:</b> если вистует один, он выбирает: в светлую (карты обоих защитников открываются всем, вистующий ходит и за пасовавшего) или в тёмную. При двух вистующих игра всегда тёмная.</li>
-        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода.</li>
+        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода. Когда карты открыты, вистующие решают, кто руководит ловлей («играю» / «доверяю»): руководящий ходит за обоих, второй наблюдает.</li>
         <li><b>Конец игры:</b> когда каждый закрыл пулю до ${s.limit}, либо когда все трое проголосовали за завершение. Пуля и гора переводятся в висты по 10 за очко относительно среднего по столу; висты сводятся попарно.</li>
       </ul>
       <div class="foot"><button id="closeRules">Закрыть</button></div>

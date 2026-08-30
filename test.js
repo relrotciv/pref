@@ -51,6 +51,11 @@ function stepBot(g) {
       return true;
     }
 
+    if (v.phase === 'play' && v.misereRoles && v.misereRoles.yourChoice) {
+      engine.act(g, seat, { type: 'misereRole', role: Math.random() < 0.5 ? 'play' : 'trust' });
+      return true;
+    }
+
     if (v.phase === 'play' && v.claim && v.claim.yourReply) {
       engine.act(g, seat, { type: 'claimReply', agree: Math.random() < 0.5 });
       return true;
@@ -309,6 +314,49 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   engine.act(g, 0, { type: 'claimReply', agree: true });
   assert(g.phase === 'hand_end', 'misère claim scored');
   assert(g.score.pool[1] === 10, 'clean misère pools 10');
+}
+
+// Targeted scenario: misère leadership — conflict, re-choice, leader plays both hands.
+{
+  const g = engine.newGame('test08', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  // Seat 2 declares misère; first hand is seat 1 (a defender leads -> open at once).
+  engine.act(g, 1, { type: 'pass' });
+  engine.act(g, 2, { type: 'bid', bid: { misere: true } });
+  engine.act(g, 0, { type: 'pass' });
+  const v2 = engine.view(g, 2);
+  engine.act(g, 2, { type: 'discard', cards: [v2.hand[0], v2.hand[1]], contract: {} });
+  assert(g.play.misereOpen, 'misère open before the first card');
+  // Defenders cannot play until the roles are settled.
+  assert(engine.view(g, 1).play.legal === null, 'no legal moves before roles are settled');
+  let blocked = false;
+  try { engine.act(g, 1, { type: 'play', card: g.hands[1][0] }); } catch (e) { blocked = true; }
+  assert(blocked, 'leading defender blocked until roles are settled');
+  // Both say "играю" -> conflict, choices reset.
+  engine.act(g, 1, { type: 'misereRole', role: 'play' });
+  engine.act(g, 0, { type: 'misereRole', role: 'play' });
+  assert(g.play.mctl.conflict === 'play' && g.play.mctl.leader === null, 'same choice -> conflict');
+  assert(engine.view(g, 1).misereRoles.yourChoice, 'defenders choose again after a conflict');
+  // Now they split: seat 0 plays, seat 1 trusts.
+  engine.act(g, 0, { type: 'misereRole', role: 'play' });
+  engine.act(g, 1, { type: 'misereRole', role: 'trust' });
+  assert(g.play.mctl.leader === 0 && g.play.mctl.passive === 1, 'leader and passive assigned');
+  // It is seat 1's turn; only the leader may act, using seat 1's cards.
+  assert(engine.view(g, 1).play.legal === null, 'trusting defender gets no moves');
+  const vLead = engine.view(g, 0);
+  assert(vLead.play.actingFor === 1 && vLead.play.legal.length > 0, 'leader acts for the partner');
+  assert(vLead.openHands[1], 'leader sees the partner cards');
+  const vTrust = engine.view(g, 1);
+  assert(vTrust.openHands[0] && vTrust.openHands[2], 'trusting defender sees both other hands');
+  assert(!engine.view(g, 2).openHands[1] && !engine.view(g, 2).openHands[0],
+    'declarer does not see defender cards');
+  blocked = false;
+  try { engine.act(g, 1, { type: 'play', card: g.hands[1][0] }); } catch (e) { blocked = true; }
+  assert(blocked, 'trusting defender cannot play own cards');
+  engine.act(g, 0, { type: 'play', card: vLead.play.legal[0] });
+  assert(g.play.trick.length === 1 && g.play.trick[0].seat === 1, 'leader played from partner hand');
 }
 
 console.log(`All good — ${assertions} assertions passed.`);

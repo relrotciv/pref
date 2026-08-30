@@ -16,6 +16,7 @@ fs.mkdirSync(DATA, { recursive: true });
 
 const games = new Map();      // id -> game state
 const streams = new Map();    // id -> Set of {playerId, res}
+const waiters = new Map();    // id -> Set of parked long-poll responses
 
 function gameFile(id) { return path.join(DATA, id + '.json'); }
 
@@ -53,15 +54,33 @@ function connectedSeats(g) {
   return conn;
 }
 
+function personalView(g, playerId) {
+  const v = engine.view(g, seatOf(g, playerId), connectedSeats(g));
+  v.v = g.v || 0;
+  return v;
+}
+
 function broadcast(g) {
+  g.v = (g.v || 0) + 1;
   const set = streams.get(g.id);
-  if (!set) return;
-  const conn = connectedSeats(g);
-  for (const s of set) {
-    const v = engine.view(g, seatOf(g, s.playerId), conn);
-    try {
-      s.res.write(`data: ${JSON.stringify(v)}\n\n`);
-    } catch (e) { /* dropped connection; cleaned up on close */ }
+  if (set) {
+    const conn = connectedSeats(g);
+    for (const s of set) {
+      const v = engine.view(g, seatOf(g, s.playerId), conn);
+      v.v = g.v;
+      try {
+        s.res.write(`data: ${JSON.stringify(v)}\n\n`);
+      } catch (e) { /* dropped connection; cleaned up on close */ }
+    }
+  }
+  // Wake parked long-poll requests instantly.
+  const ws = waiters.get(g.id);
+  if (ws) {
+    waiters.delete(g.id);
+    for (const w of ws) {
+      clearTimeout(w.timer);
+      try { sendJSON(w.res, 200, personalView(g, w.playerId)); } catch (e) { /* gone */ }
+    }
   }
 }
 
@@ -133,11 +152,44 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const apiMatch = p.match(/^\/api\/game\/([a-z0-9]+)\/(join|action|events)$/);
+    const apiMatch = p.match(/^\/api\/game\/([a-z0-9]+)\/(join|action|events|info|state)$/);
     if (apiMatch) {
       const g = loadGame(apiMatch[1]);
       if (!g) { sendJSON(res, 404, { error: 'Игра не найдена' }); return; }
       const cmd = apiMatch[2];
+
+      if (cmd === 'info' && req.method === 'GET') {
+        sendJSON(res, 200, {
+          players: g.players.map((pl) => ({ name: pl.name })),
+          full: g.players.length >= 3,
+          phase: g.phase,
+        });
+        return;
+      }
+
+      // Personalized state with long-polling: pass v=<last seen version> and
+      // wait=1 to park the request until the table changes (or ~25s). This
+      // gives instant updates to clients whose SSE connection does not
+      // deliver (some proxies/browsers).
+      if (cmd === 'state' && req.method === 'GET') {
+        const playerId = url.searchParams.get('playerId') || '';
+        const since = parseInt(url.searchParams.get('v') || '0', 10) || 0;
+        const wait = url.searchParams.get('wait') === '1';
+        if (!wait || (g.v || 0) > since) {
+          sendJSON(res, 200, personalView(g, playerId));
+          return;
+        }
+        let ws = waiters.get(g.id);
+        if (!ws) { ws = new Set(); waiters.set(g.id, ws); }
+        const w = { res, playerId, timer: null };
+        w.timer = setTimeout(() => {
+          ws.delete(w);
+          try { sendJSON(res, 200, personalView(g, playerId)); } catch (e) { /* gone */ }
+        }, 25000);
+        ws.add(w);
+        req.on('close', () => { clearTimeout(w.timer); ws.delete(w); });
+        return;
+      }
 
       if (cmd === 'join' && req.method === 'POST') {
         const body = await readBody(req);
@@ -147,7 +199,13 @@ const server = http.createServer(async (req, res) => {
           if (seat >= 0) { sendJSON(res, 200, { playerId: body.playerId, seat }); return; }
         }
         const playerId = crypto.randomBytes(12).toString('hex');
-        const seat = engine.addPlayer(g, body.name, playerId);
+        let seat;
+        try {
+          seat = engine.addPlayer(g, body.name, playerId);
+        } catch (e) {
+          console.log(`join refused: game=${g.id} players=${g.players.length} name=${JSON.stringify(body.name)} — ${e.message}`);
+          throw e;
+        }
         saveGame(g);
         broadcast(g);
         sendJSON(res, 200, { playerId, seat });
@@ -200,7 +258,7 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(404); res.end('Not found');
   } catch (e) {
-    if (e.expected) sendJSON(res, 400, { error: e.message });
+    if (e.expected) sendJSON(res, 400, { error: e.message, code: e.code });
     else {
       console.error(e);
       sendJSON(res, 500, { error: 'Ошибка сервера' });

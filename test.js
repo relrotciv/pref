@@ -46,7 +46,22 @@ function stepBot(g) {
       return true;
     }
 
-    if (v.phase === 'play' && v.play.legal) {
+    if (v.phase === 'lightChoice' && v.lightChoice.yours) {
+      engine.act(g, seat, { type: 'lightChoice', open: Math.random() < 0.5 });
+      return true;
+    }
+
+    if (v.phase === 'play' && v.claim && v.claim.yourReply) {
+      engine.act(g, seat, { type: 'claimReply', agree: Math.random() < 0.5 });
+      return true;
+    }
+
+    if (v.phase === 'play' && v.canClaim && Math.random() < 0.03) {
+      engine.act(g, seat, { type: 'claim' });
+      return true;
+    }
+
+    if (v.phase === 'play' && v.play.legal && !g.claim) {
       assert(v.play.legal.length > 0, 'always at least one legal card');
       // No card may ever appear twice among the not-yet-played cards. In a
       // contract game the talon lives on in the declarer's hand / discard, so
@@ -185,6 +200,115 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   engine.act(g, 1, { type: 'play', card: 'c10' });
   const legal2b = engine.view(g, 2).play.legal;
   assert(legal2b.every((c) => c[0] === 'c'), 'after two tricks the actual lead binds');
+}
+
+// Targeted scenario: light whist — open hands and the whister playing for the passer.
+{
+  const g = engine.newGame('test04', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  // Seat 1 (first hand) wins 6s, others pass.
+  engine.act(g, 1, { type: 'bid', bid: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'pass' });
+  engine.act(g, 0, { type: 'pass' });
+  const v1 = engine.view(g, 1);
+  engine.act(g, 1, { type: 'discard', cards: [v1.hand[0], v1.hand[1]], contract: { level: 6, suit: 's' } });
+  // Seat 2 whists, seat 0 passes -> lone whister must get the light/dark choice.
+  engine.act(g, 2, { type: 'whistDecision', decision: 'whist' });
+  engine.act(g, 0, { type: 'whistDecision', decision: 'pass' });
+  assert(g.phase === 'lightChoice', 'lone whister chooses light or dark');
+  assert(engine.view(g, 2).lightChoice.yours, 'the choice belongs to the whister');
+  engine.act(g, 2, { type: 'lightChoice', open: true });
+  assert(g.phase === 'play' && g.play.light, 'light whist play started');
+  // Both defenders' hands are open to everyone else (declarer included).
+  const vd = engine.view(g, 1);
+  assert(vd.openHands[2] && vd.openHands[0], 'declarer sees both defenders open');
+  // Play until it is the passer's (seat 0) turn, then the whister acts for them.
+  for (let i = 0; i < 30 && g.phase === 'play'; i++) {
+    if (g.play.turn === 0) {
+      const vPasser = engine.view(g, 0);
+      assert(vPasser.play.legal === null, 'passer cannot play own cards in light whist');
+      const vWhister = engine.view(g, 2);
+      assert(vWhister.play.actingFor === 0 && vWhister.play.legal.length > 0,
+        'whister acts for the passer');
+      engine.act(g, 2, { type: 'play', card: vWhister.play.legal[0] });
+    } else {
+      const v = engine.view(g, g.play.turn);
+      engine.act(g, g.play.turn, { type: 'play', card: v.play.legal[0] });
+    }
+  }
+  assert(g.phase === 'hand_end', 'light whist deal completes');
+}
+
+// Targeted scenario: misère opens right after the discard when a defender leads.
+{
+  const g = engine.newGame('test05', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  // Seat 2 declares misère (first word), others pass. First hand is seat 1.
+  engine.act(g, 1, { type: 'pass' });
+  engine.act(g, 2, { type: 'bid', bid: { misere: true } });
+  engine.act(g, 0, { type: 'pass' });
+  assert(g.declarer === 2, 'misère declarer seated');
+  const v2 = engine.view(g, 2);
+  engine.act(g, 2, { type: 'discard', cards: [v2.hand[0], v2.hand[1]], contract: {} });
+  assert(g.phase === 'play' && g.contract.misere, 'misère play starts without whisting');
+  // Leader is seat 1 (not the declarer) -> cards are open immediately.
+  assert(g.play.misereOpen, 'misère cards open right after the discard');
+  assert(engine.view(g, 0).openHands[2], 'defender sees the misère hand before any card');
+}
+
+// Targeted scenario: claim ("все мои") — refusal resumes play, agreement scores.
+{
+  const g = engine.newGame('test06', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  engine.act(g, 1, { type: 'bid', bid: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'pass' });
+  engine.act(g, 0, { type: 'pass' });
+  const v1 = engine.view(g, 1);
+  engine.act(g, 1, { type: 'discard', cards: [v1.hand[0], v1.hand[1]], contract: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'whistDecision', decision: 'whist' });
+  engine.act(g, 0, { type: 'whistDecision', decision: 'whist' });
+  assert(g.phase === 'play', 'two whisters -> straight to play');
+  // Declarer claims; the first whister declines -> play resumes.
+  engine.act(g, 1, { type: 'claim' });
+  assert(engine.view(g, 2).claim.yourReply && engine.view(g, 0).claim.yourReply, 'both whisters must reply');
+  let blocked = false;
+  try { engine.act(g, g.play.turn, { type: 'play', card: g.hands[g.play.turn][0] }); } catch (e) { blocked = true; }
+  assert(blocked, 'no cards while a claim is pending');
+  engine.act(g, 2, { type: 'claimReply', agree: false });
+  assert(g.phase === 'play' && !g.claim, 'refusal resumes play');
+  // Claim again; both agree -> declarer takes all 10, whisters get responsible penalty.
+  engine.act(g, 1, { type: 'claim' });
+  engine.act(g, 2, { type: 'claimReply', agree: true });
+  assert(g.phase === 'play', 'waits for the second reply');
+  engine.act(g, 0, { type: 'claimReply', agree: true });
+  assert(g.phase === 'hand_end', 'claim agreed -> deal scored');
+  assert(g.score.pool[1] === 2, 'declarer pools the six game');
+  assert(g.score.gora[2] + g.score.gora[0] === 8, 'whisters short 4 tricks -> 8 to the mountain (sochi)');
+}
+
+// Targeted scenario: misère claim ("нет взяток").
+{
+  const g = engine.newGame('test07', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  engine.act(g, 1, { type: 'bid', bid: { misere: true } });
+  engine.act(g, 2, { type: 'pass' });
+  engine.act(g, 0, { type: 'pass' });
+  const v1 = engine.view(g, 1);
+  engine.act(g, 1, { type: 'discard', cards: [v1.hand[0], v1.hand[1]], contract: {} });
+  assert(g.phase === 'play' && g.contract.misere, 'misère play');
+  engine.act(g, 1, { type: 'claim' });
+  engine.act(g, 2, { type: 'claimReply', agree: true });
+  engine.act(g, 0, { type: 'claimReply', agree: true });
+  assert(g.phase === 'hand_end', 'misère claim scored');
+  assert(g.score.pool[1] === 10, 'clean misère pools 10');
 }
 
 console.log(`All good — ${assertions} assertions passed.`);

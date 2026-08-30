@@ -112,7 +112,12 @@ function newGame(id, variant, limit) {
   };
 }
 
-function err(msg) { const e = new Error(msg); e.expected = true; return e; }
+function err(msg, code) {
+  const e = new Error(msg);
+  e.expected = true;
+  if (code) e.code = code;
+  return e;
+}
 
 // The "sheet" mirrors the paper pulya drawing: every entry is recorded as a
 // running total (2.4.6…), one list per band, exactly as written by hand.
@@ -168,7 +173,7 @@ function log(g, msg) {
 }
 
 function addPlayer(g, name, playerId) {
-  if (g.players.length >= 3) throw err('За этим столом уже трое игроков');
+  if (g.players.length >= 3) throw err('За этим столом уже трое игроков', 'table_full');
   name = String(name || '').trim().slice(0, 20) || `Игрок ${g.players.length + 1}`;
   const seat = g.players.length;
   g.players.push({ id: playerId, name });
@@ -191,6 +196,7 @@ function startDeal(g) {
   g.discard = [];
   g.declarer = -1; g.contract = null; g.wonBid = null; g.wonRank = -1;
   g.whisting = null; g.play = null; g.summary = null;
+  g.lightChoice = null; g.lightWhist = null; g.claim = null;
   g.lastWords = ['', '', ''];
   g.phase = 'bidding';
   const fh = (g.dealer + 1) % 3;
@@ -339,9 +345,28 @@ function actWhist(g, seat, a) {
   if (whisters.length === 0) {
     const half = w.order.find((s) => w.decisions[s] === 'half');
     scoreContractNoPlay(g, half === undefined ? null : half);
+  } else if (whisters.length === 1) {
+    // A lone whister chooses light (both defenders' cards open, whister
+    // plays for both) or dark (normal closed play).
+    g.phase = 'lightChoice';
+    g.lightChoice = {
+      whister: whisters[0],
+      passer: w.order.find((s) => s !== whisters[0]),
+    };
   } else {
     startPlay(g);
   }
+}
+
+function actLightChoice(g, seat, a) {
+  const lc = g.lightChoice;
+  if (seat !== lc.whister) throw err('Светлую или тёмную выбирает вистующий');
+  if (a.open !== true && a.open !== false) throw err('Некорректный выбор');
+  g.lightWhist = a.open ? { whister: lc.whister, passer: lc.passer } : null;
+  g.lastWords[seat] = a.open ? 'вист в светлую' : 'вист в тёмную';
+  log(g, `${pname(g, seat)}: вист ${a.open ? 'в светлую' : 'в тёмную'}`);
+  g.lightChoice = null;
+  startPlay(g);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +388,12 @@ function startPlay(g) {
   g.play = {
     trump, leader: fh, turn: fh, trick: [], lastTrick: null,
     tricks: [0, 0, 0], done: 0, misereOpen: false,
+    light: g.lightWhist || null,
   };
+  // Misère is always played open: if a defender leads, the declarer's cards
+  // are exposed right after the discard; otherwise after the declarer's
+  // first card (handled in actPlay).
+  if (c.misere && fh !== g.declarer) g.play.misereOpen = true;
 }
 
 // Raspasy: for the first two tricks the talon card, revealed one per trick,
@@ -406,14 +436,62 @@ function trickWinner(trick, trump, leadSuit) {
   return best.seat;
 }
 
-function actPlay(g, seat, a) {
+// Fast finish: the declarer claims the remaining tricks ("все мои") or, on
+// misère, claims to take none ("нет взяток"). Every defender who plays their
+// own cards must agree; one refusal resumes play.
+function actClaim(g, seat) {
+  if (g.contract.raspas) throw err('На распасах нет быстрого завершения');
+  if (seat !== g.declarer) throw err('Быстрое завершение объявляет играющий');
+  if (g.claim) throw err('Предложение уже сделано');
+  const others = [(seat + 1) % 3, (seat + 2) % 3];
+  const deciders = others.filter((s) => !(g.play.light && s === g.play.light.passer));
+  g.claim = { by: seat, deciders, agreed: [] };
+  g.lastWords[seat] = g.contract.misere ? 'нет взяток!' : 'все мои!';
+  log(g, `${pname(g, seat)}: ${g.contract.misere ? 'нет взяток' : 'все мои'} — предлагает завершить розыгрыш`);
+}
+
+function actClaimReply(g, seat, a) {
+  const c = g.claim;
+  if (!c) throw err('Нет активного предложения');
+  if (!c.deciders.includes(seat)) throw err('Ваш ответ здесь не требуется');
+  if (c.agreed.includes(seat)) throw err('Вы уже согласились');
+  if (a.agree === false) {
+    g.claim = null;
+    g.lastWords[seat] = 'ещё поиграем';
+    log(g, `${pname(g, seat)}: нет, ещё поиграем`);
+    return;
+  }
+  if (a.agree !== true) throw err('Некорректный ответ');
+  c.agreed.push(seat);
+  log(g, `${pname(g, seat)}: согласен`);
+  if (c.agreed.length < c.deciders.length) return;
+  // Everyone agreed: assign the remaining tricks and score the deal.
+  const rest = 10 - g.play.done;
+  if (g.contract.misere) {
+    g.play.tricks[(g.declarer + 1) % 3] += rest; // defenders' tricks don't score on misère
+  } else {
+    g.play.tricks[g.declarer] += rest;
+  }
+  g.play.done = 10;
+  g.claim = null;
+  log(g, 'Розыгрыш завершён досрочно');
+  scoreContract(g);
+}
+
+function actPlay(g, actorSeat, a) {
   const p = g.play;
+  let seat = actorSeat;
+  // In light whist the whister plays the passer's cards too.
+  if (p.light && actorSeat === p.light.whister && p.turn === p.light.passer) {
+    seat = p.light.passer;
+  }
   if (seat !== p.turn) throw err('Сейчас не ваш ход');
+  if (p.light && actorSeat === p.light.passer) throw err('В светлую за вас ходит вистующий');
   const card = a.card;
   if (!legalPlays(g, seat).includes(card)) throw err('Этой картой сейчас ходить нельзя');
   g.hands[seat] = g.hands[seat].filter((c) => c !== card);
   p.trick.push({ seat, card });
-  if (g.contract.misere) p.misereOpen = true; // declarer's cards open after the first move
+  if (g.contract.misere && seat === g.declarer) p.misereOpen = true;
 
   if (p.trick.length < 3) {
     p.turn = (p.turn + 1) % 3;
@@ -606,8 +684,14 @@ function act(g, seat, a) {
     case 'whisting':
       if (a.type !== 'whistDecision') throw err('Идёт вистование');
       actWhist(g, seat, a); return;
+    case 'lightChoice':
+      if (a.type !== 'lightChoice') throw err('Ждём решения вистующего');
+      actLightChoice(g, seat, a); return;
     case 'play':
+      if (a.type === 'claim') { actClaim(g, seat); return; }
+      if (a.type === 'claimReply') { actClaimReply(g, seat, a); return; }
       if (a.type !== 'play') throw err('Ждём хода картой');
+      if (g.claim) throw err('Сначала ответьте на предложение завершить розыгрыш');
       actPlay(g, seat, a); return;
     case 'hand_end':
       if (a.type !== 'next') throw err('Ждём следующей сдачи');
@@ -683,8 +767,17 @@ function view(g, seat, connected) {
     };
   }
 
+  if (g.phase === 'lightChoice') {
+    out.lightChoice = {
+      turn: g.lightChoice.whister,
+      yours: seat === g.lightChoice.whister,
+    };
+  }
+
   if (g.phase === 'play') {
     const p = g.play;
+    // In light whist the whister acts for the passer's turn as well.
+    const controller = (p.light && p.turn === p.light.passer) ? p.light.whister : p.turn;
     out.play = {
       turn: p.turn,
       trick: p.trick,
@@ -692,15 +785,31 @@ function view(g, seat, connected) {
       tricks: p.tricks,
       trump: p.trump,
       done: p.done,
-      legal: seat === p.turn ? legalPlays(g, seat) : null,
+      legal: seat === controller ? legalPlays(g, p.turn) : null,
+      actingFor: (seat === controller && controller !== p.turn) ? p.turn : null,
+      light: p.light,
       whistDecisions: g.whisting ? g.whisting.decisions : null,
       whistNeed: c && c.level ? WHIST_NEED[c.level] : null,
     };
+    if (g.claim) {
+      out.claim = {
+        by: g.claim.by,
+        misere: !!c.misere,
+        yourReply: g.claim.deciders.includes(seat) && !g.claim.agreed.includes(seat),
+      };
+    }
+    out.canClaim = seat === g.declarer && !g.claim && !c.raspas;
     if (c.raspas) {
       out.talon = g.talon.slice(0, Math.min(p.done + 1, 2));
     }
     if (c.misere && p.misereOpen && seat !== g.declarer) {
       out.openHands[g.declarer] = sortHand(g.hands[g.declarer]);
+    }
+    if (p.light) {
+      // Light whist: both defenders' cards lie open for everyone.
+      for (const s of [p.light.whister, p.light.passer]) {
+        if (s !== seat) out.openHands[s] = sortHand(g.hands[s]);
+      }
     }
   }
 

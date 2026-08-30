@@ -53,7 +53,11 @@ async function api(path, body) {
     body: JSON.stringify(body || {}),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Запрос не удался');
+  if (!r.ok) {
+    const e = new Error(data.error || 'Запрос не удался');
+    e.code = data.code;
+    throw e;
+  }
   return data;
 }
 
@@ -121,6 +125,44 @@ function initGame(id) {
 }
 
 function renderJoin() {
+  // Peek at the table first: if it is already full, offer to start a new
+  // table instead of a doomed name form. Plain JSON with a hard timeout —
+  // if anything goes wrong we just show the join form.
+  app.innerHTML = '<div class="join"><p class="chip">Открываем стол…</p></div>';
+  let decided = false;
+  const decide = (st) => {
+    if (decided) return;
+    decided = true;
+    if (st && st.full) renderTableFull(st);
+    else renderJoinForm();
+  };
+  setTimeout(() => decide(null), 5000);
+  fetch(`/api/game/${gameId}/info`, { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then(decide)
+    .catch(() => decide(null));
+}
+
+function renderTableFull(st) {
+  app.innerHTML = '';
+  app.appendChild(el(`
+    <div class="join">
+      <h2>Стол занят</h2>
+      <p class="chip">${st && st.players && st.players.length
+        ? `За этим столом уже играют: ${st.players.map((p) => esc(p.name)).join(', ')}.`
+        : 'За этим столом уже сидят три игрока.'}</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:18px">
+        <button class="primary" id="btnNewTable">Создать новый стол</button>
+        <button class="hbtn" id="btnSpectate" style="padding:10px">Наблюдать за игрой</button>
+      </div>
+      <p class="chip" style="margin-top:14px">Если это ваш стол — откройте его в браузере,
+        где вы садились за него, или по персональной ссылке с ?as=…</p>
+    </div>`));
+  document.getElementById('btnNewTable').onclick = () => { location.href = '/'; };
+  document.getElementById('btnSpectate').onclick = () => { playerId = ''; connect(); };
+}
+
+function renderJoinForm() {
   const savedName = localStorage.getItem('pref:name') || '';
   app.innerHTML = '';
   app.appendChild(el(`
@@ -136,29 +178,70 @@ function renderJoin() {
   input.focus();
   document.getElementById('joinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button');
+    if (btn.disabled) return; // guard against double submits
+    btn.disabled = true;
+    btn.textContent = 'Садимся…';
     try {
       const { playerId: pid } = await api(`/api/game/${gameId}/join`, { name: input.value });
       localStorage.setItem('pref:pid:' + gameId, pid);
       localStorage.setItem('pref:name', input.value.trim());
       playerId = pid;
       connect();
-    } catch (err) { toast(err.message); }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Сесть за стол';
+      if (err.code === 'table_full') renderTableFull(null);
+      else toast(err.message);
+    }
   });
 }
 
+let lastUpdateAt = 0;
+let lastV = 0;
+let sessionToken = 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function applyState(st) {
+  if (!st) return;
+  if (st.v && st.v <= lastV) return; // stale (SSE and long-poll race)
+  lastV = st.v || lastV;
+  state = st;
+  lastUpdateAt = Date.now();
+  if (state.phase !== lastPhase) {
+    selectedDiscards = new Set();
+    selectedContract = null;
+    lastPhase = state.phase;
+  }
+  render();
+}
+
 function connect() {
+  app.innerHTML = '<div class="join"><p class="chip">Подключаемся к столу…</p></div>';
+  const token = ++sessionToken;
   if (evtSource) evtSource.close();
   evtSource = new EventSource(`/api/game/${gameId}/events?playerId=${playerId}`);
-  evtSource.onmessage = (e) => {
-    state = JSON.parse(e.data);
-    if (state.phase !== lastPhase) {
-      selectedDiscards = new Set();
-      selectedContract = null;
-      lastPhase = state.phase;
+  evtSource.onmessage = (e) => applyState(JSON.parse(e.data));
+  evtSource.onerror = () => { /* EventSource auto-reconnects; long-poll covers us */ };
+  pollLoop(token);
+}
+
+// Long-polling companion channel: the server answers the moment the table
+// changes, so updates are instant even where SSE does not deliver.
+async function pollLoop(token) {
+  while (token === sessionToken) {
+    try {
+      const r = await fetch(
+        `/api/game/${gameId}/state?playerId=${playerId}&v=${lastV}&wait=1`,
+        { cache: 'no-store' });
+      if (token !== sessionToken) return;
+      if (r.ok) applyState(await r.json());
+      else await sleep(2000);
+    } catch (e) {
+      if (token !== sessionToken) return;
+      await sleep(2000);
     }
-    render();
-  };
-  evtSource.onerror = () => { /* EventSource auto-reconnects */ };
+  }
 }
 
 function act(action) {
@@ -210,10 +293,6 @@ function seatPanel(seat) {
   const turnSeat = currentTurn();
   const tricks = state.play ? ` · взятки: <b>${state.play.tricks[seat]}</b>` : '';
   const word = state.lastWords[seat] ? `<span class="word">${esc(state.lastWords[seat])}</span>` : '';
-  let openHand = '';
-  if (state.openHands && state.openHands[seat]) {
-    openHand = `<div class="open-hand">${state.openHands[seat].map(miniCard).join('')}</div>`;
-  }
   const n = state.handCounts[seat];
   return `
     <div class="seat ${turnSeat === seat ? 'turn' : ''}">
@@ -222,13 +301,36 @@ function seatPanel(seat) {
       <div class="sub">${word}${tricks}</div>
       ${state.phase !== 'lobby' && !isYou(seat)
         ? `<div class="cardsback">${n} ${ruPlural(n, 'карта', 'карты', 'карт')}</div>` : ''}
-      ${openHand}
     </div>`;
+}
+
+// Open hands (misère, light whist): full-size cards on the partner's side of
+// the table, one cascaded row per suit.
+function openHandBlock(seat) {
+  const s = state;
+  if (seat == null || !s.openHands || !s.openHands[seat]) return '';
+  const acting = s.play && s.play.actingFor === seat && s.play.legal;
+  const legalSet = acting ? new Set(s.play.legal) : null;
+  const bySuit = {};
+  for (const c of s.openHands[seat]) (bySuit[c[0]] = bySuit[c[0]] || []).push(c);
+  const rows = ['s', 'h', 'c', 'd'].filter((su) => bySuit[su]).map((su) =>
+    `<div class="suit-row">${bySuit[su].map((c) => {
+      if (acting) {
+        return cardHTML(c, legalSet.has(c) ? 'playable raise' : 'dim',
+          `data-opencard="${c}" ${legalSet.has(c) ? '' : 'disabled'}`);
+      }
+      return cardHTML(c, '', 'disabled');
+    }).join('')}</div>`).join('');
+  return `<div class="open-block">
+    <div class="lbl">${esc(name(seat))} — в открытую${acting ? ' · <b>ваш ход</b>' : ''}</div>
+    ${rows}
+  </div>`;
 }
 
 function currentTurn() {
   if (state.bidding) return state.bidding.turn;
   if (state.whisting) return state.whisting.turn;
+  if (state.lightChoice) return state.lightChoice.turn;
   if (state.play) return state.play.turn;
   if (state.phase === 'discard') return state.declarer;
   return -1;
@@ -247,7 +349,7 @@ function render() {
 
   app.innerHTML = `
     <header>
-      <h1>Преферанс<span class="pip"> ♠</span></h1>
+      <h1><a href="/" title="Создать новый стол">Преферанс<span class="pip"> ♠</span></a></h1>
       <div class="chips">
         <span class="chip"><b>${esc(s.variantTitle)}</b></span>
         <span class="chip">пуля до <b>${s.limit}</b></span>
@@ -262,9 +364,17 @@ function render() {
     </header>
     <div class="table-wrap">
       <div class="opponents">${seatPanel(seats.left)}${seatPanel(seats.right)}</div>
-      <div class="center" id="center"></div>
+      <div class="middle">
+        <div class="side left">${openHandBlock(seats.left)}</div>
+        <div class="center" id="center"></div>
+        <div class="side right">${openHandBlock(seats.right)}${s.you < 0 ? openHandBlock(seats.me) : ''}</div>
+      </div>
       <div class="actions" id="actions"></div>
-      <div class="hand" id="hand"></div>
+      <div class="hand-row">
+        <div class="hand-side left" id="handSideL"></div>
+        <div class="hand" id="hand"></div>
+        <div class="hand-side right" id="handSideR"></div>
+      </div>
       ${s.you >= 0 ? `<div class="myseat"><span class="nm">${esc(name(s.you))}</span>
         <span class="sub">${esc(s.lastWords[s.you] || '')}</span></div>` : ''}
     </div>
@@ -284,6 +394,10 @@ function render() {
   renderCenter();
   renderActions();
   renderHand();
+  // Light whist: the whister plays the passer's open cards.
+  app.querySelectorAll('[data-opencard]').forEach((b) => {
+    b.onclick = () => act({ type: 'play', card: b.dataset.opencard });
+  });
   if (s.phase === 'finished') openScore();
 }
 
@@ -316,6 +430,11 @@ function renderCenter() {
     html += `<div class="status">${yourTurn
       ? `<b>Ваше слово:</b> вист или пас? (вистующим положено взяток: ${s.whisting.need})`
       : `Ждём слова <b>${youName(turn)}</b>`}</div>`;
+  } else if (s.phase === 'lightChoice') {
+    html += contractLine;
+    html += `<div class="status">${s.lightChoice.yours
+      ? '<b>Вы вистуете один.</b> Играть в светлую (карты защитников открываются, вы ходите за обоих) или в тёмную?'
+      : `<b>${youName(s.lightChoice.turn)}</b> выбирает: в светлую или в тёмную…`}</div>`;
   } else if (s.phase === 'play') {
     html += contractLine;
     if (s.talon && s.contract && s.contract.raspas) {
@@ -324,7 +443,22 @@ function renderCenter() {
         cardHTML(t, i === active ? 'talon-active' : '', 'disabled')).join('')}</div>`;
     }
     html += renderTrick();
-    html += `<div class="status">${yourTurn ? '<b>Ваш ход.</b>' : `Ходит <b>${youName(turn)}</b>…`}</div>`;
+    let playStatus;
+    if (s.claim) {
+      const word = s.claim.misere ? '«нет взяток»' : '«все мои»';
+      playStatus = s.claim.yourReply
+        ? `<b>${youName(s.claim.by)}</b> говорит ${word}. Завершить розыгрыш?`
+        : `<b>${youName(s.claim.by)}</b> предлагает завершить розыгрыш (${word}) — ждём ответа…`;
+    } else if (s.play.actingFor !== null && s.play.actingFor !== undefined) {
+      playStatus = `<b>Ваш ход из открытой руки</b> (${esc(name(s.play.actingFor))}).`;
+    } else if (s.play.light && s.play.light.passer === s.you && turn === s.you) {
+      playStatus = `Вист в светлую: за вас ходит <b>${esc(name(s.play.light.whister))}</b>…`;
+    } else if (yourTurn) {
+      playStatus = '<b>Ваш ход.</b>';
+    } else {
+      playStatus = `Ходит <b>${youName(turn)}</b>…`;
+    }
+    html += `<div class="status">${playStatus}</div>`;
     if (s.play.lastTrick) {
       html += `<div class="last-trick">Прошлая взятка: ${s.play.lastTrick.cards.map((x) => miniCard(x.card)).join(' ')}
         — ${youName(s.play.lastTrick.winner)}</div>`;
@@ -450,14 +584,46 @@ function renderActions() {
     });
   }
 
+  if (s.phase === 'lightChoice' && s.lightChoice.yours) {
+    a.appendChild(el(`<div class="action-row">
+      <button class="abtn" data-light="1">В светлую</button>
+      <button class="abtn" data-light="0">В тёмную</button>
+    </div>`));
+    a.querySelectorAll('[data-light]').forEach((b) => {
+      b.onclick = () => act({ type: 'lightChoice', open: b.dataset.light === '1' });
+    });
+  }
+
+  // Claim controls live beside the hand, on free space to the right of the cards.
+  if (s.phase === 'play') {
+    const side = document.getElementById('handSideR');
+    if (s.claim && s.claim.yourReply) {
+      side.appendChild(el(`<div class="claim-box">
+        <button class="abtn" data-agree>Согласен</button>
+        <button class="abtn warn" data-decline>Нет, ещё поиграем</button>
+      </div>`));
+      side.querySelector('[data-agree]').onclick = () => act({ type: 'claimReply', agree: true });
+      side.querySelector('[data-decline]').onclick = () => act({ type: 'claimReply', agree: false });
+    } else if (s.canClaim) {
+      side.appendChild(el(`<div class="claim-box">
+        <button class="abtn" data-claim>${s.contract && s.contract.misere ? 'Нет взяток' : 'Все мои'}</button>
+      </div>`));
+      side.querySelector('[data-claim]').onclick = () => act({ type: 'claim' });
+    }
+  }
+
   if (s.phase === 'hand_end' && s.you >= 0) {
     a.appendChild(el(`<div class="action-row"><button class="abtn" data-next>Следующая сдача →</button></div>`));
     a.querySelector('[data-next]').onclick = () => act({ type: 'next' });
   }
 
   if (s.phase === 'finished') {
-    a.appendChild(el(`<div class="action-row"><button class="abtn" data-sheet>Открыть пулю</button></div>`));
+    a.appendChild(el(`<div class="action-row">
+      <button class="abtn" data-sheet>Открыть пулю</button>
+      <button class="abtn" data-newtable>Новый стол</button>
+    </div>`));
     a.querySelector('[data-sheet]').onclick = () => openScore();
+    a.querySelector('[data-newtable]').onclick = () => { location.href = '/'; };
   }
 }
 
@@ -471,7 +637,9 @@ function renderHand() {
   if (s.you < 0 || !s.hand.length) { h.innerHTML = ''; return; }
 
   const discardMode = s.phase === 'discard' && isYou(s.declarer);
-  const legal = (s.play && s.play.legal) ? new Set(s.play.legal) : null;
+  // When acting for the passer (light whist), legal refers to THEIR hand.
+  const legal = (s.play && s.play.legal && s.play.actingFor == null)
+    ? new Set(s.play.legal) : null;
 
   const someBlocked = legal && legal.size < s.hand.length;
   h.innerHTML = s.hand.map((card) => {
@@ -692,7 +860,8 @@ function openRules() {
           : 'в этой конвенции не используется.'}</li>
         <li><b>Торговля:</b> от 6♠ до 10БК; мизер стоит между 8БК и 9♠ и может быть только первым словом. Старшая рука может держать равную заявку.</li>
         <li><b>Распасы (розыгрыш):</b> карты прикупа открываются по одной; в первых двух взятках ходом считается карта прикупа — все обязаны класть её масть (при отсутствии — любую), взятку берёт старшая карта масти прикупа.</li>
-        <li><b>Мизер:</b> карты играющего открываются после первого хода.</li>
+        <li><b>Светлая/тёмная:</b> если вистует один, он выбирает: в светлую (карты обоих защитников открываются всем, вистующий ходит и за пасовавшего) или в тёмную. При двух вистующих игра всегда тёмная.</li>
+        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода.</li>
         <li><b>Конец игры:</b> когда каждый закрыл пулю до ${s.limit}, либо когда все трое проголосовали за завершение. Пуля и гора переводятся в висты по 10 за очко относительно среднего по столу; висты сводятся попарно.</li>
       </ul>
       <div class="foot"><button id="closeRules">Закрыть</button></div>

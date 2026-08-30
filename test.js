@@ -350,8 +350,9 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   assert(vLead.openHands[1], 'leader sees the partner cards');
   const vTrust = engine.view(g, 1);
   assert(vTrust.openHands[0] && vTrust.openHands[2], 'trusting defender sees both other hands');
-  assert(!engine.view(g, 2).openHands[1] && !engine.view(g, 2).openHands[0],
-    'declarer does not see defender cards');
+  const vDecl = engine.view(g, 2);
+  assert(vDecl.openHands[0] && vDecl.openHands[1],
+    'declarer sees all cards once roles are settled');
   blocked = false;
   try { engine.act(g, 1, { type: 'play', card: g.hands[1][0] }); } catch (e) { blocked = true; }
   assert(blocked, 'trusting defender cannot play own cards');

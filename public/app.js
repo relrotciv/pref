@@ -313,15 +313,22 @@ function openHandBlock(seat) {
   const legalSet = acting ? new Set(s.play.legal) : null;
   const bySuit = {};
   for (const c of s.openHands[seat]) (bySuit[c[0]] = bySuit[c[0]] || []).push(c);
-  const rows = ['s', 'h', 'c', 'd'].filter((su) => bySuit[su]).map((su) =>
-    `<div class="suit-row">${bySuit[su].map((c) => {
-      if (acting) {
-        return cardHTML(c, legalSet.has(c) ? 'playable raise' : 'dim',
-          `data-opencard="${c}" ${legalSet.has(c) ? '' : 'disabled'}`);
-      }
-      return cardHTML(c, '', 'disabled');
-    }).join('')}</div>`).join('');
-  return `<div class="open-block">
+  // Long suits continue on extra rows so cards always lie loosely.
+  const chunks = [];
+  for (const su of ['s', 'h', 'c', 'd']) {
+    const cardsOfSuit = bySuit[su] || [];
+    for (let i = 0; i < cardsOfSuit.length; i += 4) chunks.push(cardsOfSuit.slice(i, i + 4));
+  }
+  const rows = chunks.map((arr) => {
+    return `<div class="suit-row">${arr.map((c, i) => {
+      const card = acting
+        ? cardHTML(c, legalSet.has(c) ? 'playable raise' : 'dim',
+          `data-opencard="${c}" ${legalSet.has(c) ? '' : 'disabled'}`)
+        : cardHTML(c, '', 'disabled');
+      return `<div class="cslot ${i === arr.length - 1 ? 'last' : ''}">${card}</div>`;
+    }).join('')}</div>`;
+  }).join('');
+  return `<div class="open-block rows${Math.min(chunks.length, 6)}">
     <div class="lbl">${esc(name(seat))} — в открытую${acting ? ' · <b>ваш ход</b>' : ''}</div>
     ${rows}
   </div>`;
@@ -364,7 +371,7 @@ function render() {
     </header>
     <div class="table-wrap">
       <div class="opponents">${seatPanel(seats.left)}${seatPanel(seats.right)}</div>
-      <div class="middle">
+      <div class="middle${Object.keys(s.openHands || {}).length >= 2 ? ' two-open' : ''}">
         <div class="side left">${openHandBlock(seats.left)}</div>
         <div class="center" id="center"></div>
         <div class="side right">${openHandBlock(seats.right)}${s.you < 0 ? openHandBlock(seats.me) : ''}</div>
@@ -884,7 +891,7 @@ function openRules() {
         <li><b>Торговля:</b> от 6♠ до 10БК; мизер стоит между 8БК и 9♠ и может быть только первым словом. Старшая рука может держать равную заявку.</li>
         <li><b>Распасы (розыгрыш):</b> карты прикупа открываются по одной; в первых двух взятках ходом считается карта прикупа — все обязаны класть её масть (при отсутствии — любую), взятку берёт старшая карта масти прикупа.</li>
         <li><b>Светлая/тёмная:</b> если вистует один, он выбирает: в светлую (карты обоих защитников открываются всем, вистующий ходит и за пасовавшего) или в тёмную. При двух вистующих игра всегда тёмная.</li>
-        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода. Когда карты открыты, вистующие решают, кто руководит ловлей («играю» / «доверяю»): руководящий ходит за обоих, второй наблюдает.</li>
+        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода. Затем вистующие решают, кто руководит ловлей («играю» / «доверяю»): руководящий ходит за обоих, второй наблюдает, и с этого момента все карты открыты всем, включая играющего.</li>
         <li><b>Конец игры:</b> когда каждый закрыл пулю до ${s.limit}, либо когда все трое проголосовали за завершение. Пуля и гора переводятся в висты по 10 за очко относительно среднего по столу; висты сводятся попарно.</li>
       </ul>
       <div class="foot"><button id="closeRules">Закрыть</button></div>

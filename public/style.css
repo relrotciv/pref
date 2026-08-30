@@ -30,9 +30,9 @@ body {
   min-height: 100vh;
 }
 
-/* Card size follows the window height so the whole table fits on screen. */
+/* Card size follows the window so the whole table fits on screen. */
 :root {
-  --card-h: min(260px, 28vh);
+  --card-h: min(260px, 28vh, 18vw);
   --card-w: calc(var(--card-h) * 0.708);
 }
 
@@ -202,11 +202,27 @@ header .spacer { flex: 1; }
 }
 .side {
   flex: none;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  max-width: 27%;
   overflow-y: auto;
 }
+/* A side with an open hand gets a firm share of the width: everything not
+   needed by the trick area. The flexible slots inside use it. */
+.side:has(.open-block) {
+  width: min(calc(100% - var(--card-w) * 3.3 - 60px), calc(var(--card-w) * 3.6));
+}
+/* With open hands on both sides the trick area shrinks (it is informational)
+   and the freed width goes to the partners' cards. */
+.middle.two-open .side:has(.open-block) {
+  width: calc((100% - var(--card-w) * 2.2 - 32px) / 2);
+}
+.middle.two-open .trick .card,
+.middle.two-open .trick .empty {
+  width: calc(var(--card-w) * 0.64);
+  height: calc(var(--card-h) * 0.64);
+}
+.middle.two-open .trick { gap: 10px; }
 .side.left { align-items: flex-start; }
 .side.right { align-items: flex-end; }
 /* Center when there is room; scroll from the top when there is not. */
@@ -220,11 +236,25 @@ header .spacer { flex: 1; }
   margin-bottom: 2px;
 }
 .open-block .lbl b { color: var(--brass); letter-spacing: 0; text-transform: none; }
-.suit-row { display: flex; }
-.suit-row .card { margin-right: calc(var(--card-w) * -0.7); flex: none; }
-.suit-row .card:last-child { margin-right: 0; }
-/* Cascade: each next suit row overlaps the previous, leaving its top visible. */
-.open-block .suit-row + .suit-row { margin-top: calc(var(--card-h) * -0.76); }
+/* Horizontal spacing adapts by itself: every card except the last one sits
+   in a shrinkable slot — cards lie loosely when there is room and pack
+   tighter only when the suit is long or the space is narrow. */
+.suit-row { display: flex; max-width: 100%; }
+.cslot {
+  flex: 0 1 calc(var(--card-w) * 0.8);
+  min-width: calc(var(--card-w) * 0.4);
+  height: var(--card-h);
+  position: relative;
+}
+.cslot.last { flex: 0 0 var(--card-w); min-width: var(--card-w); }
+.cslot .card { position: absolute; left: 0; top: 0; }
+/* Cascade: each next suit row overlaps the previous, leaving its top visible.
+   The fewer rows there are, the more of every card shows vertically. */
+.open-block .suit-row + .suit-row { margin-top: calc(var(--card-h) * -0.8); }
+.open-block.rows2 .suit-row + .suit-row { margin-top: calc(var(--card-h) * -0.5); }
+.open-block.rows3 .suit-row + .suit-row { margin-top: calc(var(--card-h) * -0.58); }
+.open-block.rows4 .suit-row + .suit-row { margin-top: calc(var(--card-h) * -0.72); }
+.open-block.rows5 .suit-row + .suit-row { margin-top: calc(var(--card-h) * -0.78); }
 
 /* ------------------------------------------------------------------ center */
 

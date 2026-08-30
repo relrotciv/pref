@@ -860,14 +860,12 @@ function view(g, seat, connected) {
         conflict: m.conflict,
       };
     }
-    // Once misère roles are settled, the defenders see each other's cards:
-    // the leader plays the trusting partner's hand, the trusting partner
-    // watches the whole position.
-    if (m && m.leader !== null && seat === m.leader) {
-      out.openHands[m.passive] = sortHand(g.hands[m.passive]);
-    }
-    if (m && m.leader !== null && seat === m.passive) {
-      out.openHands[m.leader] = sortHand(g.hands[m.leader]);
+    // Once misère roles are settled the position is fully open: everyone —
+    // the leader, the trusting defender and the declarer — sees all cards.
+    if (m && m.leader !== null) {
+      for (let s = 0; s < 3; s++) {
+        if (s !== seat) out.openHands[s] = sortHand(g.hands[s]);
+      }
     }
     if (p.light) {
       // Light whist: both defenders' cards lie open for everyone.

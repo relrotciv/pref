@@ -179,17 +179,17 @@ header .spacer { flex: 1; }
   background: rgba(0, 0, 0, .18);
 }
 .seat.turn { border-color: var(--brass); box-shadow: 0 0 12px rgba(201, 163, 90, .35); }
-.seat .nm { font-size: 17px; display: flex; align-items: baseline; gap: 8px; }
+.seat .nm { font-size: 24px; display: flex; align-items: baseline; gap: 8px; }
 .seat .dot { width: 8px; height: 8px; border-radius: 50%; background: #777; display: inline-block; flex: none; align-self: center; }
 .seat .dot.on { background: var(--good); }
-.seat .sub { font-size: 13px; color: var(--paper-dim); font-style: italic; min-height: 18px; }
-.seat .word { color: var(--brass); font-style: normal; }
+.seat .sub { font-size: 21px; color: var(--paper-dim); font-style: italic; min-height: 30px; }
+.seat .word { color: var(--brass); font-style: normal; font-size: 28px; }
 .badge {
-  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  font-size: 14px; letter-spacing: .1em; text-transform: uppercase;
   border: 1px solid var(--brass-dim); color: var(--brass);
-  border-radius: 3px; padding: 0 5px;
+  border-radius: 3px; padding: 0 6px;
 }
-.seat .cardsback { color: var(--paper-dim); font-size: 12px; }
+.seat .cardsback { color: var(--paper-dim); font-size: 17px; }
 
 /* open hands (misère, light whist): full-size cards on the partner's side,
    one cascaded row per suit. */
@@ -217,12 +217,10 @@ header .spacer { flex: 1; }
 .middle.two-open .side:has(.open-block) {
   width: calc((100% - var(--card-w) * 2.2 - 32px) / 2);
 }
-.middle.two-open .trick .card,
-.middle.two-open .trick .empty {
-  width: calc(var(--card-w) * 0.64);
-  height: calc(var(--card-h) * 0.64);
+.middle.two-open .trick {
+  --tw: calc(var(--card-w) * 0.64);
+  --th: calc(var(--card-h) * 0.64);
 }
-.middle.two-open .trick { gap: 10px; }
 .side.left { align-items: flex-start; }
 .side.right { align-items: flex-end; }
 /* Center when there is room; scroll from the top when there is not. */
@@ -275,17 +273,30 @@ header .spacer { flex: 1; }
 .status { font-size: 18px; font-style: italic; color: var(--paper); text-align: center; flex: none; }
 .status b { color: var(--brass); font-style: normal; }
 
-.contract-line { font-size: 15px; color: var(--paper-dim); }
-.contract-line b { color: var(--brass); font-size: 18px; }
+.contract-line { font-size: 17px; color: var(--paper-dim); }
+.contract-line b { color: var(--brass); font-size: 23px; }
 
 .talon { display: flex; gap: 10px; align-items: center; }
 .talon .lbl { font-size: 13px; letter-spacing: .15em; text-transform: uppercase; color: var(--paper-dim); }
 
-.trick { display: flex; gap: 26px; align-items: flex-end; flex: none; }
-.trick .slot { text-align: center; }
-.trick .slot .who { font-size: 13px; color: var(--paper-dim); margin-top: 6px; font-style: italic; }
+/* The trick as a triangle: each card sits toward its player. */
+.trick {
+  --tw: var(--card-w);
+  --th: var(--card-h);
+  position: relative;
+  width: calc(var(--tw) * 2.5);
+  height: calc(var(--th) * 1.3 + 46px);
+  flex: none;
+}
+.trick .card, .trick .empty { width: var(--tw); height: var(--th); }
+.trick .slot { position: absolute; text-align: center; }
+.trick .slot .who { font-size: 14px; color: var(--paper-dim); font-style: italic; padding: 2px 0; }
+.trick .slot.pos-left { left: 0; top: 0; }
+.trick .slot.pos-right { right: 0; top: 0; }
+.trick .slot.pos-me { left: 50%; transform: translateX(-50%); bottom: 0; }
+.trick .pos-left .card, .trick .pos-left .empty { transform: rotate(-5deg); }
+.trick .pos-right .card, .trick .pos-right .empty { transform: rotate(5deg); }
 .trick .empty {
-  width: var(--card-w); height: var(--card-h);
   border: 1px dashed var(--felt-line); border-radius: 5px;
 }
 
@@ -342,8 +353,9 @@ button.card.sel { transform: translateY(-28px); box-shadow: 0 0 0 3px var(--bras
 .talon .card.talon-active { box-shadow: 0 0 0 3px var(--brass), var(--shadow); }
 
 .myseat { display: flex; justify-content: center; gap: 12px; align-items: baseline; margin-top: 2px; flex: none; }
-.myseat .nm { font-size: 17px; color: var(--brass); }
-.myseat .sub { font-size: 13px; color: var(--paper-dim); font-style: italic; }
+.myseat .nm { font-size: 19px; color: var(--brass); }
+.myseat .sub { font-size: 17px; color: var(--paper-dim); font-style: italic; }
+.myseat .sub b { color: var(--paper); font-style: normal; }
 
 /* ----------------------------------------------------------------- actions */
 
@@ -355,7 +367,7 @@ button.card.sel { transform: translateY(-28px); box-shadow: 0 0 0 3px var(--bras
   flex: none;
 }
 
-.bid-grid { display: grid; grid-template-columns: repeat(5, 58px); gap: 4px; }
+.bid-grid { display: grid; grid-template-columns: repeat(5, 76px); gap: 5px; }
 .bid-grid button, .abtn {
   font-family: var(--serif);
   font-size: 15px;
@@ -365,6 +377,7 @@ button.card.sel { transform: translateY(-28px); box-shadow: 0 0 0 3px var(--bras
   background: rgba(0, 0, 0, .25);
   color: var(--paper);
 }
+.bid-grid button { font-size: 20px; }
 .bid-grid button.redsuit { color: #e8917f; }
 .bid-grid button:not(:disabled):hover, .abtn:not(:disabled):hover {
   border-color: var(--brass); background: rgba(201, 163, 90, .15);
@@ -512,9 +525,8 @@ dialog::backdrop { background: rgba(10, 20, 14, .75); }
   .seat { min-width: 0; flex: 1; padding: 6px 8px; }
   .seat .nm { font-size: 14px; }
   .hand .card { margin-right: calc(var(--card-w) * -0.62); }
-  .trick { gap: 12px; }
   .mini-card { width: 36px; }
-  .bid-grid { grid-template-columns: repeat(5, 52px); }
+  .bid-grid { grid-template-columns: repeat(5, 62px); }
   header h1 { letter-spacing: .2em; font-size: 16px; }
 }
 

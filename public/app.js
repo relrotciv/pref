@@ -202,18 +202,77 @@ let lastV = 0;
 let sessionToken = 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function applyState(st) {
-  if (!st) return;
-  if (st.v && st.v <= lastV) return; // stale (SSE and long-poll race)
-  lastV = st.v || lastV;
+let frozen = false;      // showing a just-completed trick for a moment
+let pendingReal = null;  // freshest state held back while frozen
+
+function finishApply(st) {
   state = st;
-  lastUpdateAt = Date.now();
   if (state.phase !== lastPhase) {
     selectedDiscards = new Set();
     selectedContract = null;
     lastPhase = state.phase;
   }
   render();
+}
+
+// Did this update complete a trick? Return the finished trick if so.
+function completedTrick(prev, st) {
+  if (!prev || prev.phase !== 'play' || !prev.play || prev.play.trick.length !== 2) return null;
+  let lt = null;
+  if (st.phase === 'play' && st.play && st.play.trick.length === 0 && st.play.lastTrick) lt = st.play.lastTrick;
+  if (st.phase === 'hand_end' && st.lastTrick) lt = st.lastTrick;
+  if (!lt) return null;
+  const prevCards = prev.play.trick.map((t) => t.card);
+  if (!prevCards.every((c) => lt.cards.some((x) => x.card === c))) return null;
+  return lt;
+}
+
+// A snapshot of the previous state with the full trick on the table and all
+// interaction stripped — shown for a couple of seconds before the table clears.
+function makeFrozen(prev, lt) {
+  const f = structuredClone(prev);
+  // The third card is on the table now — take it out of its player's hand
+  // (own hand, open hand, card counter) so it is not shown twice.
+  const third = lt.cards.find((x) => !f.play.trick.some((t) => t.card === x.card));
+  if (third) {
+    f.handCounts[third.seat] = Math.max(0, f.handCounts[third.seat] - 1);
+    if (third.seat === f.you) f.hand = f.hand.filter((c) => c !== third.card);
+    if (f.openHands && f.openHands[third.seat]) {
+      f.openHands[third.seat] = f.openHands[third.seat].filter((c) => c !== third.card);
+    }
+  }
+  f.play.trick = lt.cards;
+  f.play.turn = -1;
+  f.play.legal = null;
+  f.play.actingFor = null;
+  f.claim = null;
+  f.canClaim = false;
+  f.misereRoles = null;
+  f._frozenWinner = lt.winner;
+  return f;
+}
+
+function applyState(st) {
+  if (!st) return;
+  if (st.v && st.v <= lastV) return; // stale (SSE and long-poll race)
+  lastV = st.v || lastV;
+  lastUpdateAt = Date.now();
+  if (frozen) { pendingReal = st; return; } // will render when the pause ends
+  const lt = completedTrick(state, st);
+  if (lt) {
+    frozen = true;
+    pendingReal = st;
+    state = makeFrozen(state, lt);
+    render();
+    setTimeout(() => {
+      frozen = false;
+      const real = pendingReal;
+      pendingReal = null;
+      finishApply(real);
+    }, 2000);
+    return;
+  }
+  finishApply(st);
 }
 
 function connect() {
@@ -383,7 +442,8 @@ function render() {
         <div class="hand-side right" id="handSideR"></div>
       </div>
       ${s.you >= 0 ? `<div class="myseat"><span class="nm">${esc(name(s.you))}</span>
-        <span class="sub">${esc(s.lastWords[s.you] || '')}</span></div>` : ''}
+        <span class="sub">${esc(s.lastWords[s.you] || '')}${s.play
+          ? ` · взятки: <b>${s.play.tricks[s.you]}</b>` : ''}</span></div>` : ''}
     </div>
     <dialog id="dlgScore"></dialog>
     <dialog id="dlgRules"></dialog>
@@ -451,7 +511,11 @@ function renderCenter() {
     }
     html += renderTrick();
     let playStatus;
-    if (s.misereRoles) {
+    if (s._frozenWinner !== undefined && s._frozenWinner !== null) {
+      playStatus = s._frozenWinner === s.you
+        ? 'Взятка <b>ваша</b>…'
+        : `Взятку забирает <b>${esc(name(s._frozenWinner))}</b>…`;
+    } else if (s.misereRoles) {
       const conflictNote = s.misereRoles.conflict
         ? '<b>Оба выбрали одно и то же</b> — один должен играть, второй довериться. '
         : '';
@@ -503,19 +567,22 @@ function trumpNote() {
   return s.play.trump ? `, козырь ${GLYPH[s.play.trump]}` : ', без козыря';
 }
 
+// The trick lies as a triangle: every card faces its player — left opponent
+// top-left, right opponent top-right, own card at the bottom.
 function renderTrick() {
   const s = state;
-  const slots = [];
-  // Show trick slots in play order starting from the leader.
-  const order = [];
-  const leader = s.play.trick.length ? s.play.trick[0].seat : s.play.turn;
-  for (let i = 0; i < 3; i++) order.push((leader + i) % 3);
-  for (const seat of order) {
+  const seats = s.you >= 0
+    ? { left: (s.you + 1) % 3, right: (s.you + 2) % 3, me: s.you }
+    : { left: 0, right: 1, me: 2 };
+  const slot = (seat, pos) => {
     const played = s.play.trick.find((x) => x.seat === seat);
-    slots.push(`<div class="slot">${played ? cardHTML(played.card, '', 'disabled') : '<div class="empty"></div>'}
-      <div class="who">${youName(seat)}</div></div>`);
-  }
-  return `<div class="trick">${slots.join('')}</div>`;
+    const who = `<div class="who">${youName(seat)}</div>`;
+    const card = played ? cardHTML(played.card, '', 'disabled') : '<div class="empty"></div>';
+    return `<div class="slot pos-${pos}">${pos === 'me' ? card + who : who + card}</div>`;
+  };
+  return `<div class="trick">
+    ${slot(seats.left, 'left')}${slot(seats.right, 'right')}${slot(seats.me, 'me')}
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -879,7 +946,7 @@ function openRules() {
       <h3>Правила стола — ${esc(s.variantTitle)}</h3>
       <ul>
         <li><b>Вист:</b> ${s.rules.whist === 'responsible'
-          ? 'ответственный — если вистующие недобирают положенные взятки (4 на шестерной, 2 на семерной, 1 на восьмерной и девятерной), недобор пишется им в гору.'
+          ? 'ответственный — недобор положенных взяток (4 на шестерной, 2 на семерной, 1 на восьмерной и девятерной) пишется в гору. При двух вистующих обязательство делится поровну (нечётная взятка — на первом), и гору пишет только тот, кто недобрал своё.'
           : 'джентльменский — недобор вистующих не наказывается.'}</li>
         <li><b>Распасы:</b> ${s.rules.progressiveRaspas
           ? 'прогрессирующие — каждый следующий распас удваивает цену взятки (1, 2, 4, …); сыгранная игра сбрасывает прогрессию.'

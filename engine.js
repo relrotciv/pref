@@ -635,20 +635,24 @@ function scoreContract(g) {
       }
     }
     const need = WHIST_NEED[L];
-    const short = need - defTricks;
-    if (short > 0 && v.whist === 'responsible' && whisters.length > 0) {
+    if (v.whist === 'responsible' && whisters.length > 0) {
       if (whisters.length === 1) {
-        addGora(g, whisters[0], short * cost);
-        lines.push(`Ответственный вист: ${pname(g, whisters[0])} недобрал ${short} → +${short * cost} в гору`);
+        const short = need - defTricks;
+        if (short > 0) {
+          addGora(g, whisters[0], short * cost);
+          lines.push(`Ответственный вист: ${pname(g, whisters[0])} недобрал ${short} → +${short * cost} в гору`);
+        }
       } else {
-        const pen = short * cost;
-        const [w1, w2] = whisters;
-        const less = g.play.tricks[w1] <= g.play.tricks[w2] ? w1 : w2;
-        const more = less === w1 ? w2 : w1;
-        const a = Math.ceil(pen / 2);
-        addGora(g, less, a);
-        addGora(g, more, pen - a);
-        lines.push(`Ответственный вист: вистующие недобрали ${short} → +${a} в гору (${pname(g, less)}), +${pen - a} в гору (${pname(g, more)})`);
+        // Two whisters: the obligation splits evenly (the odd trick, if any,
+        // falls on the first whister) and each answers only for his own share.
+        const oblig = [Math.ceil(need / 2), Math.floor(need / 2)];
+        whisters.forEach((s, i) => {
+          const short = oblig[i] - g.play.tricks[s];
+          if (short > 0) {
+            addGora(g, s, short * cost);
+            lines.push(`Ответственный вист: ${pname(g, s)} недобрал ${short} из ${oblig[i]} → +${short * cost} в гору`);
+          }
+        });
       }
     }
   } else {
@@ -815,6 +819,10 @@ function view(g, seat, connected) {
     };
   }
 
+  // The final trick of a deal is still needed at hand_end so clients can
+  // show it for a moment before the summary.
+  if (g.phase === 'hand_end' && g.play) out.lastTrick = g.play.lastTrick;
+
   if (g.phase === 'play') {
     const p = g.play;
     // In light whist the whister acts for the passer's turn as well;
@@ -845,6 +853,10 @@ function view(g, seat, connected) {
         misere: !!c.misere,
         yourReply: g.claim.deciders.includes(seat) && !g.claim.agreed.includes(seat),
       };
+      // The claimant's cards open up so the agree/decline decision is informed.
+      if (seat !== g.claim.by) {
+        out.openHands[g.claim.by] = sortHand(g.hands[g.claim.by]);
+      }
     }
     out.canClaim = seat === g.declarer && !g.claim && !c.raspas;
     if (c.raspas) {

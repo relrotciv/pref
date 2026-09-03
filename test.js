@@ -360,4 +360,52 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   assert(g.play.trick.length === 1 && g.play.trick[0].seat === 1, 'leader played from partner hand');
 }
 
+// Targeted scenario: individual whist responsibility — only the whister who
+// missed his own share pays; the claimant's cards open during a claim.
+{
+  const g = engine.newGame('test09', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  // Deal 1: dealer 0, first hand = seat 1 = declarer.
+  engine.act(g, 1, { type: 'bid', bid: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'pass' });
+  engine.act(g, 0, { type: 'pass' });
+  const v1 = engine.view(g, 1);
+  engine.act(g, 1, { type: 'discard', cards: [v1.hand[0], v1.hand[1]], contract: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'whistDecision', decision: 'whist' });
+  engine.act(g, 0, { type: 'whistDecision', decision: 'whist' });
+  // Fix the position: whister seat 2 will take exactly his two tricks.
+  g.hands = [
+    ['c12', 'c11', 'c10', 'c9', 'd14', 'd13', 'd12', 'd11', 'd10', 'd9'], // seat 0 (whister B)
+    ['c7', 'c8', 's7', 's8', 's9', 's10', 's11', 's12', 'd7', 'd8'],      // seat 1 (declarer)
+    ['c14', 'c13', 'h7', 'h8', 'h9', 'h10', 'h11', 'h12', 'h13', 'h14'],  // seat 2 (whister A)
+  ];
+  engine.act(g, 1, { type: 'play', card: 'c7' });
+  engine.act(g, 2, { type: 'play', card: 'c14' });
+  engine.act(g, 0, { type: 'play', card: 'c9' });
+  engine.act(g, 2, { type: 'play', card: 'c13' });
+  engine.act(g, 0, { type: 'play', card: 'c11' });
+  engine.act(g, 1, { type: 'play', card: 'c8' });
+  assert(g.play.tricks[2] === 2, 'whister A took his two tricks');
+  engine.act(g, 2, { type: 'play', card: 'h7' });
+  engine.act(g, 0, { type: 'play', card: 'd9' });   // void in hearts, no trumps
+  engine.act(g, 1, { type: 'play', card: 's7' });   // must trump
+  assert(g.play.tricks[1] === 1, 'declarer trumped the heart');
+  // Declarer claims the rest; his cards open to both defenders.
+  engine.act(g, 1, { type: 'claim' });
+  assert(engine.view(g, 2).openHands[1] && engine.view(g, 0).openHands[1],
+    'claimant cards are open to the defenders');
+  assert(!engine.view(g, 1).openHands[1], 'claimant does not list his own hand as open');
+  engine.act(g, 2, { type: 'claimReply', agree: true });
+  engine.act(g, 0, { type: 'claimReply', agree: true });
+  assert(g.phase === 'hand_end', 'claim agreed');
+  // Six game made with 8 tricks; whister A (2/2) pays nothing,
+  // whister B (0/2) alone goes to the mountain for 2×2=4.
+  assert(g.score.pool[1] === 2, 'declarer pools the six game');
+  assert(g.score.gora[2] === 0, 'whister who took his share pays nothing');
+  assert(g.score.gora[0] === 4, 'only the short whister goes to the mountain');
+  assert(g.score.whists[2][1] === 4, 'whister A writes whists for his two tricks');
+}
+
 console.log(`All good — ${assertions} assertions passed.`);

@@ -145,8 +145,29 @@ function ensureSheet(g) {
 function addPool(g, seat, n) {
   if (n <= 0) return;
   ensureSheet(g);
-  g.score.pool[seat] += n;
-  g.sheet.pool[seat].push(g.score.pool[seat]);
+  for (let i = 0; i < n; i++) {
+    if (g.score.pool[seat] < g.limit) {
+      g.score.pool[seat] += 1;
+      g.sheet.pool[seat].push(g.score.pool[seat]);
+      continue;
+    }
+    // Own pool is closed: the point goes into the emptiest open pool of an
+    // opponent, earning 10 whists on him ("закрыть другого").
+    const others = [(seat + 1) % 3, (seat + 2) % 3].filter((s) => g.score.pool[s] < g.limit);
+    if (others.length) {
+      const target = (others.length === 2 && g.score.pool[others[1]] < g.score.pool[others[0]])
+        ? others[1] : others[0];
+      g.score.pool[target] += 1;
+      g.sheet.pool[target].push(g.score.pool[target]);
+      addWhists(g, seat, target, 10);
+      log(g, `${pname(g, seat)}: пуля закрыта — очко пишется в пулю ${pname(g, target)}, +10 вистов на него`);
+    } else if (g.score.gora[seat] > 0) {
+      // Every pool is closed: the point burns one's own mountain instead.
+      g.score.gora[seat] -= 1;
+      g.sheet.gora[seat].push(g.score.gora[seat]);
+      log(g, `${pname(g, seat)}: все пули закрыты — очко списывает гору`);
+    }
+  }
 }
 
 function addGora(g, seat, n) {
@@ -322,6 +343,7 @@ function actDiscard(g, seat, a) {
 function whistOptions(g, seat) {
   const w = g.whisting;
   const v = VARIANTS[g.variant];
+  if (w.reWhist) return ['whist', 'pass'];
   if (w.idx === 0) return ['whist', 'pass'];
   const first = w.decisions[w.order[0]];
   const opts = ['whist', 'pass'];
@@ -329,18 +351,8 @@ function whistOptions(g, seat) {
   return opts;
 }
 
-function actWhist(g, seat, a) {
+function resolveWhisting(g) {
   const w = g.whisting;
-  if (seat !== w.order[w.idx]) throw err('Сейчас не ваше слово');
-  const d = a.decision;
-  if (!whistOptions(g, seat).includes(d)) throw err('Такое слово сейчас недоступно');
-  const ruWord = { whist: 'вист', pass: 'пас', half: 'полвиста' }[d];
-  w.decisions[seat] = d;
-  g.lastWords[seat] = ruWord;
-  log(g, `${pname(g, seat)}: ${ruWord}`);
-  w.idx++;
-  if (w.idx < 2) return;
-
   const whisters = w.order.filter((s) => w.decisions[s] === 'whist');
   if (whisters.length === 0) {
     const half = w.order.find((s) => w.decisions[s] === 'half');
@@ -356,6 +368,46 @@ function actWhist(g, seat, a) {
   } else {
     startPlay(g);
   }
+}
+
+function actWhist(g, seat, a) {
+  const w = g.whisting;
+  const expected = w.reWhist ? w.order[0] : w.order[w.idx];
+  if (seat !== expected) throw err('Сейчас не ваше слово');
+  const d = a.decision;
+  if (!whistOptions(g, seat).includes(d)) throw err('Такое слово сейчас недоступно');
+
+  // Second word after "пас — полвиста": the first defender may re-whist.
+  if (w.reWhist) {
+    w.reWhist = false;
+    if (d === 'whist') {
+      const half = w.order[1];
+      w.decisions[seat] = 'whist';
+      w.decisions[half] = 'pass';
+      g.lastWords[seat] = 'вист';
+      g.lastWords[half] = 'пас';
+      log(g, `${pname(g, seat)} перевистовал — полвиста ${pname(g, half)} снимается`);
+    } else {
+      log(g, `${pname(g, seat)}: пас — остаётся полвиста`);
+    }
+    resolveWhisting(g);
+    return;
+  }
+
+  const ruWord = { whist: 'вист', pass: 'пас', half: 'полвиста' }[d];
+  w.decisions[seat] = d;
+  g.lastWords[seat] = ruWord;
+  log(g, `${pname(g, seat)}: ${ruWord}`);
+  w.idx++;
+  if (w.idx < 2) return;
+
+  // "пас — полвиста": the word returns to the first defender.
+  if (w.decisions[w.order[0]] === 'pass' && w.decisions[w.order[1]] === 'half') {
+    w.reWhist = true;
+    log(g, `Слово возвращается: ${pname(g, w.order[0])} может перевистовать`);
+    return;
+  }
+  resolveWhisting(g);
 }
 
 function actLightChoice(g, seat, a) {
@@ -542,7 +594,12 @@ function actPlay(g, actorSeat, a) {
   p.tricks[winner]++;
   p.done++;
   p.trick = [];
-  p.leader = p.turn = winner;
+  // Raspasy: the talon led the first two tricks, not a player — so the
+  // second talon trick and the third trick both start from the first hand.
+  // Only from the fourth trick on does the trick winner lead.
+  let next = winner;
+  if (g.contract.raspas && p.done <= 2) next = (g.dealer + 1) % 3;
+  p.leader = p.turn = next;
   if (p.done === 10) {
     if (g.contract.raspas) scoreRaspas(g);
     else scoreContract(g);
@@ -804,11 +861,13 @@ function view(g, seat, connected) {
 
   if (g.phase === 'whisting') {
     const w = g.whisting;
+    const turn = w.reWhist ? w.order[0] : w.order[w.idx];
     out.whisting = {
-      turn: w.order[w.idx],
+      turn,
       decisions: w.decisions,
-      options: seat === w.order[w.idx] ? whistOptions(g, seat) : null,
+      options: seat === turn ? whistOptions(g, seat) : null,
       need: WHIST_NEED[c.level],
+      reWhist: !!w.reWhist,
     };
   }
 
@@ -847,6 +906,10 @@ function view(g, seat, connected) {
       whistDecisions: g.whisting ? g.whisting.decisions : null,
       whistNeed: c && c.level ? WHIST_NEED[c.level] : null,
     };
+    // The misère declarer's cards are shown together with the discard
+    // (12 cards) so nobody can tell what was thrown away.
+    const misereShow = () => sortHand(g.hands[g.declarer].concat(g.discard));
+
     if (g.claim) {
       out.claim = {
         by: g.claim.by,
@@ -855,7 +918,9 @@ function view(g, seat, connected) {
       };
       // The claimant's cards open up so the agree/decline decision is informed.
       if (seat !== g.claim.by) {
-        out.openHands[g.claim.by] = sortHand(g.hands[g.claim.by]);
+        out.openHands[g.claim.by] = (c.misere && g.claim.by === g.declarer)
+          ? misereShow()
+          : sortHand(g.hands[g.claim.by]);
       }
     }
     out.canClaim = seat === g.declarer && !g.claim && !c.raspas;
@@ -863,7 +928,7 @@ function view(g, seat, connected) {
       out.talon = g.talon.slice(0, Math.min(p.done + 1, 2));
     }
     if (c.misere && p.misereOpen && seat !== g.declarer) {
-      out.openHands[g.declarer] = sortHand(g.hands[g.declarer]);
+      out.openHands[g.declarer] = misereShow();
     }
     if (m && p.misereOpen && m.leader === null) {
       out.misereRoles = {
@@ -876,7 +941,9 @@ function view(g, seat, connected) {
     // the leader, the trusting defender and the declarer — sees all cards.
     if (m && m.leader !== null) {
       for (let s = 0; s < 3; s++) {
-        if (s !== seat) out.openHands[s] = sortHand(g.hands[s]);
+        if (s !== seat) {
+          out.openHands[s] = s === g.declarer ? misereShow() : sortHand(g.hands[s]);
+        }
       }
     }
     if (p.light) {

@@ -98,10 +98,15 @@ function stepBot(g) {
       for (let j = 0; j < 3; j++) {
         assert(last(g.sheet.whists[i][j]) === S.whists[i][j], 'sheet whists match total');
       }
-      // Running totals must be strictly increasing.
-      for (const arr of [g.sheet.pool[i], g.sheet.gora[i], g.sheet.whists[i][0], g.sheet.whists[i][1], g.sheet.whists[i][2]]) {
+      // Running totals must be strictly increasing (the mountain may also
+      // decrease when a fully closed table burns pool points against it).
+      for (const arr of [g.sheet.pool[i], g.sheet.whists[i][0], g.sheet.whists[i][1], g.sheet.whists[i][2]]) {
         for (let k = 1; k < arr.length; k++) assert(arr[k] > arr[k - 1], 'sheet entries increase');
       }
+      for (const arr of [g.sheet.gora[i]]) {
+        for (let k = 1; k < arr.length; k++) assert(arr[k] !== arr[k - 1], 'mountain entries change');
+      }
+      assert(S.pool[i] <= g.limit, 'pool never exceeds the limit');
     }
     engine.act(g, 0, { type: 'next' });
     return true;
@@ -158,7 +163,11 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   const opts = engine.view(g, 0).whisting.options;
   assert(opts.includes('half'), 'half-whist offered in sochi after a pass');
   engine.act(g, 0, { type: 'whistDecision', decision: 'half' });
-  assert(g.phase === 'hand_end', 'no play after pass + half-whist');
+  // "пас — полвиста": the first defender gets a second word.
+  assert(g.phase === 'whisting' && engine.view(g, 2).whisting.options !== null,
+    'the word returns to the passer after a half-whist');
+  engine.act(g, 2, { type: 'whistDecision', decision: 'pass' });
+  assert(g.phase === 'hand_end', 'no play after pass + half-whist confirmed');
   assert(g.score.pool[1] === 2, 'declarer pools 2 for a six game');
   assert(g.score.whists[0][1] === 4, 'half-whist yields 4 whists vs a six game');
 }
@@ -177,34 +186,37 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   // Fix the position: talon leads diamonds then hearts; only seat 2 holds diamonds.
   g.talon = ['d7', 'h8'];
   g.hands = [
-    ['s14', 's13', 's12', 's11', 's10', 's9', 's8', 's7', 'c14', 'c13'], // seat 0: no diamonds
-    ['h14', 'h13', 'h12', 'h11', 'h10', 'h9', 'h7', 'c12', 'c11', 'c10'], // seat 1 (first hand): no diamonds
-    ['d14', 'd13', 'd12', 'd11', 'd10', 'd9', 'd8', 'c9', 'c8', 'c7'],    // seat 2: all the diamonds
+    ['c12', 'c11', 'c10', 'c8', 'c7', 'h11', 'h10', 'h9', 'h7', 's9'],     // seat 0
+    ['s14', 's13', 's12', 's11', 's10', 's8', 's7', 'c14', 'c13', 'h12'],  // seat 1 (first hand): void in diamonds
+    ['d14', 'd13', 'd12', 'd11', 'd10', 'd9', 'd8', 'h14', 'h13', 'c9'],   // seat 2: diamonds and top hearts
   ];
   // Leader (seat 1) is void in diamonds -> may lead anything.
   assert(engine.view(g, 1).play.legal.length === 10, 'void leader may lead any card');
-  engine.act(g, 1, { type: 'play', card: 'h14' });
-  // Seat 2 must still follow the TALON suit (diamonds), not the leader's hearts.
+  engine.act(g, 1, { type: 'play', card: 's7' });
+  // Seat 2 must still follow the TALON suit (diamonds), not the leader's spades.
   const legal2 = engine.view(g, 2).play.legal;
   assert(legal2.length === 7 && legal2.every((c) => c[0] === 'd'), 'followers must follow the talon suit');
   engine.act(g, 2, { type: 'play', card: 'd9' });
-  engine.act(g, 0, { type: 'play', card: 's7' });
-  // The only diamond wins the trick even though h14 outranks it.
+  engine.act(g, 0, { type: 'play', card: 'c7' });
+  // The only diamond wins the trick even though s7 led.
   assert(g.play.tricks[2] === 1 && g.play.lastTrick.winner === 2, 'highest card of the talon suit takes the trick');
-  // Trick 2: talon leads hearts; winner of trick 1 (seat 2) has none -> any card.
-  assert(g.play.turn === 2, 'trick winner leads next');
-  engine.act(g, 2, { type: 'play', card: 'c9' });
-  const legal0 = engine.view(g, 0).play.legal;
-  assert(legal0.length === 9, 'seat 0 void in hearts plays anything');
-  engine.act(g, 0, { type: 'play', card: 'c14' });
-  const legal1 = engine.view(g, 1).play.legal;
-  assert(legal1.every((c) => c[0] === 'h') && legal1.length === 6, 'talon suit still binds on trick 2');
-  engine.act(g, 1, { type: 'play', card: 'h7' });
-  assert(g.play.lastTrick.winner === 1, 'h7 takes trick 2 as the only card of the talon suit');
-  // Trick 3: normal rules — the led card sets the suit again.
-  engine.act(g, 1, { type: 'play', card: 'c10' });
+  // Trick 2 still starts from the first hand, not from the trick winner.
+  assert(g.play.turn === 1, 'second talon trick starts from the first hand');
+  engine.act(g, 1, { type: 'play', card: 'h12' });
+  const legal2h = engine.view(g, 2).play.legal;
+  assert(legal2h.every((c) => c[0] === 'h') && legal2h.length === 2, 'talon suit binds on trick 2');
+  engine.act(g, 2, { type: 'play', card: 'h13' });
+  engine.act(g, 0, { type: 'play', card: 'h7' });
+  assert(g.play.lastTrick.winner === 2, 'highest heart takes trick 2');
+  // Trick 3: the lead returns to the first hand although seat 2 won trick 2.
+  assert(g.play.turn === 1, 'third trick led by the first hand, not the trick winner');
+  engine.act(g, 1, { type: 'play', card: 'c13' });
   const legal2b = engine.view(g, 2).play.legal;
-  assert(legal2b.every((c) => c[0] === 'c'), 'after two tricks the actual lead binds');
+  assert(legal2b.length === 1 && legal2b[0] === 'c9', 'after two tricks the actual lead binds');
+  engine.act(g, 2, { type: 'play', card: 'c9' });
+  engine.act(g, 0, { type: 'play', card: 'c8' });
+  // From the fourth trick on, the winner leads as usual.
+  assert(g.play.lastTrick.winner === 1 && g.play.turn === 1, 'winner leads from trick four');
 }
 
 // Targeted scenario: light whist — open hands and the whister playing for the passer.
@@ -258,11 +270,16 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   engine.act(g, 0, { type: 'pass' });
   assert(g.declarer === 2, 'misère declarer seated');
   const v2 = engine.view(g, 2);
-  engine.act(g, 2, { type: 'discard', cards: [v2.hand[0], v2.hand[1]], contract: {} });
+  const snos = [v2.hand[0], v2.hand[1]];
+  engine.act(g, 2, { type: 'discard', cards: snos, contract: {} });
   assert(g.phase === 'play' && g.contract.misere, 'misère play starts without whisting');
   // Leader is seat 1 (not the declarer) -> cards are open immediately.
   assert(g.play.misereOpen, 'misère cards open right after the discard');
-  assert(engine.view(g, 0).openHands[2], 'defender sees the misère hand before any card');
+  const shown = engine.view(g, 0).openHands[2];
+  assert(shown, 'defender sees the misère hand before any card');
+  // The discard is mixed back in: 12 cards shown, snos not identifiable.
+  assert(shown.length === 12 && snos.every((c) => shown.includes(c)),
+    'misère hand shown together with the discard');
 }
 
 // Targeted scenario: claim ("все мои") — refusal resumes play, agreement scores.
@@ -406,6 +423,64 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   assert(g.score.gora[2] === 0, 'whister who took his share pays nothing');
   assert(g.score.gora[0] === 4, 'only the short whister goes to the mountain');
   assert(g.score.whists[2][1] === 4, 'whister A writes whists for his two tricks');
+}
+
+// Targeted scenario: a closed pool writes into the opponents' pools for whists.
+{
+  const g = engine.newGame('test10', 'sochi', 2);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  const sixNoPlay = (declarer, order) => {
+    // declarer bids 6s in bidding order `order`, others pass; both defenders pass the whist
+    for (const s of order) {
+      engine.act(g, s, s === declarer ? { type: 'bid', bid: { level: 6, suit: 's' } } : { type: 'pass' });
+    }
+    const v = engine.view(g, declarer);
+    engine.act(g, declarer, { type: 'discard', cards: [v.hand[0], v.hand[1]], contract: { level: 6, suit: 's' } });
+    engine.act(g, (declarer + 1) % 3, { type: 'whistDecision', decision: 'pass' });
+    engine.act(g, (declarer + 2) % 3, { type: 'whistDecision', decision: 'pass' });
+  };
+  // Deal 1 (fh seat 1): seat 1 records a six game -> pool 2/2, closed.
+  sixNoPlay(1, [1, 2, 0]);
+  assert(g.score.pool[1] === 2, 'pool closed at the limit');
+  engine.act(g, 0, { type: 'next' });
+  // Deal 2 (fh seat 2): seat 1 again -> the two points spread over the
+  // emptiest opponents' pools, 10 whists each.
+  sixNoPlay(1, [2, 0, 1]);
+  assert(g.score.pool[1] === 2, 'own pool stays at the limit');
+  assert(g.score.pool[2] === 1 && g.score.pool[0] === 1, 'overflow written into the emptiest pools');
+  assert(g.score.whists[1][2] === 10 && g.score.whists[1][0] === 10, '10 whists per point written');
+  engine.act(g, 0, { type: 'next' });
+  // Deal 3 (fh seat 0): seat 1 once more -> both remaining pools close
+  // and the game settles.
+  sixNoPlay(1, [0, 1, 2]);
+  assert(g.score.pool[0] === 2 && g.score.pool[2] === 2, 'all pools closed by the writer');
+  assert(g.score.whists[1][0] === 20 && g.score.whists[1][2] === 20, 'whists on both opponents');
+  assert(g.phase === 'finished', 'all pools closed -> the game ends');
+}
+
+// Targeted scenario: пас — полвиста — вист (the passer re-whists).
+{
+  const g = engine.newGame('test11', 'sochi', 10);
+  engine.addPlayer(g, 'A', 'p1');
+  engine.addPlayer(g, 'B', 'p2');
+  engine.addPlayer(g, 'C', 'p3');
+  engine.act(g, 1, { type: 'bid', bid: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'pass' });
+  engine.act(g, 0, { type: 'pass' });
+  const v1 = engine.view(g, 1);
+  engine.act(g, 1, { type: 'discard', cards: [v1.hand[0], v1.hand[1]], contract: { level: 6, suit: 's' } });
+  engine.act(g, 2, { type: 'whistDecision', decision: 'pass' });
+  engine.act(g, 0, { type: 'whistDecision', decision: 'half' });
+  const vw = engine.view(g, 2).whisting;
+  assert(vw.reWhist && vw.turn === 2 && vw.options.join() === 'whist,pass',
+    'passer may re-whist over the half-whist');
+  engine.act(g, 2, { type: 'whistDecision', decision: 'whist' });
+  assert(g.phase === 'lightChoice' && g.lightChoice.whister === 2,
+    're-whist makes a lone whister; the half-whist is cancelled');
+  assert(g.whisting.decisions[0] === 'pass', 'half-whister becomes a passer');
+  assert(g.score.whists[0][1] === 0, 'no half-whist points are written');
 }
 
 console.log(`All good — ${assertions} assertions passed.`);

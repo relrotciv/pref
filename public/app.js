@@ -468,6 +468,14 @@ function render() {
   if (s.phase === 'finished') openScore();
 }
 
+// Who leads the first trick of this deal (always the first hand).
+function firstLeadLine() {
+  const s = state;
+  const fh = (s.dealer + 1) % 3;
+  return `<div class="hint">В розыгрыше первым ходит${fh === s.you
+    ? 'е <b>вы</b>' : ` <b>${esc(name(fh))}</b>`}</div>`;
+}
+
 function renderCenter() {
   const s = state;
   const c = document.getElementById('center');
@@ -485,21 +493,34 @@ function renderCenter() {
         <button class="hbtn" id="shareBtn">Копировать</button></div>
       <div class="hint">Отправьте эту ссылку двум партнёрам. Регистрация не нужна.</div>`;
   } else if (s.phase === 'bidding') {
-    html += `<div class="status">${yourTurn ? '<b>Ваше слово.</b> Заявка или пас.' : `Торговля — слово за <b>${youName(turn)}</b>`}</div>`;
+    html += `<div class="status${yourTurn ? ' me-turn' : ''}">${yourTurn
+      ? '<b>Ваше слово.</b> Заявка или пас.'
+      : `Торговля — слово за <b>${youName(turn)}</b>`}</div>`;
+    html += firstLeadLine();
   } else if (s.phase === 'discard') {
     html += contractLine;
     html += `<div class="talon"><span class="lbl">Прикуп</span>${s.talon.map((t) => cardHTML(t, '', 'disabled')).join('')}</div>`;
-    html += `<div class="status">${isYou(s.declarer)
+    html += `<div class="status${isYou(s.declarer) ? ' me-turn' : ''}">${isYou(s.declarer)
       ? '<b>Выберите две карты</b> в снос, объявите игру и подтвердите.'
       : `<b>${youName(s.declarer)}</b> выбирает снос и объявляет игру…`}</div>`;
+    html += firstLeadLine();
   } else if (s.phase === 'whisting') {
     html += contractLine;
-    html += `<div class="status">${yourTurn
-      ? `<b>Ваше слово:</b> вист или пас? (вистующим положено взяток: ${s.whisting.need})`
-      : `Ждём слова <b>${youName(turn)}</b>`}</div>`;
+    let whistStatus;
+    if (s.whisting.reWhist) {
+      whistStatus = yourTurn
+        ? '<b>Партнёр объявил полвиста.</b> Перевистовать (вист) или оставить (пас)?'
+        : `<b>${youName(turn)}</b> решает, перевистовать ли после полвиста…`;
+    } else {
+      whistStatus = yourTurn
+        ? `<b>Ваше слово:</b> вист или пас? (вистующим положено взяток: ${s.whisting.need})`
+        : `Ждём слова <b>${youName(turn)}</b>`;
+    }
+    html += `<div class="status${yourTurn ? ' me-turn' : ''}">${whistStatus}</div>`;
+    html += firstLeadLine();
   } else if (s.phase === 'lightChoice') {
     html += contractLine;
-    html += `<div class="status">${s.lightChoice.yours
+    html += `<div class="status${s.lightChoice.yours ? ' me-turn' : ''}">${s.lightChoice.yours
       ? '<b>Вы вистуете один.</b> Играть в светлую (карты защитников открываются, вы ходите за обоих) или в тёмную?'
       : `<b>${youName(s.lightChoice.turn)}</b> выбирает: в светлую или в тёмную…`}</div>`;
   } else if (s.phase === 'play') {
@@ -542,7 +563,12 @@ function renderCenter() {
     } else {
       playStatus = `Ходит <b>${youName(turn)}</b>…`;
     }
-    html += `<div class="status">${playStatus}</div>`;
+    const myAction = (s._frozenWinner === undefined || s._frozenWinner === null) && (
+      (s.misereRoles && s.misereRoles.yourChoice)
+      || (s.claim && s.claim.yourReply)
+      || (s.play.actingFor !== null && s.play.actingFor !== undefined)
+      || (!s.misereRoles && !s.claim && yourTurn && !!s.play.legal));
+    html += `<div class="status${myAction ? ' me-turn' : ''}">${playStatus}</div>`;
     if (s.play.lastTrick) {
       html += `<div class="last-trick">Прошлая взятка: ${s.play.lastTrick.cards.map((x) => miniCard(x.card)).join(' ')}
         — ${youName(s.play.lastTrick.winner)}</div>`;
@@ -785,8 +811,8 @@ function pulyaSVG() {
     x: pts.reduce((a2, p) => a2 + p.x, 0) / pts.length,
     y: pts.reduce((a2, p) => a2 + p.y, 0) / pts.length,
   });
-  const T1 = 0.45; // whists | mountain boundary
-  const T2 = 0.75; // mountain | pool boundary
+  const T1 = 0.45; // whists | pool boundary
+  const T2 = 0.7;  // pool | mountain boundary (mountain is nearest the centre)
 
   const bottom = s.you >= 0 ? s.you : 0;
   const leftS = (bottom + 1) % 3;
@@ -852,11 +878,11 @@ function pulyaSVG() {
     const angle = sideAngle(z.P1, z.P2);
     const M = mid(z.P1, z.P2);
 
-    const poolC = avg([lerp(z.P1, O, T2), lerp(z.P2, O, T2), lerp(z.P1, O, 0.93), lerp(z.P2, O, 0.93)]);
-    out += textBlock(poolC, angle, joined(s.sheet.pool[z.seat]), 13, 14, 2, 'pen');
+    const goraC = avg([lerp(z.P1, O, T2), lerp(z.P2, O, T2), lerp(z.P1, O, 0.93), lerp(z.P2, O, 0.93)]);
+    out += textBlock(goraC, angle, joined(s.sheet.gora[z.seat]), 13, 16, 3, 'pen');
 
-    const goraC = avg([lerp(z.P1, O, T1), lerp(z.P2, O, T1), lerp(z.P1, O, T2), lerp(z.P2, O, T2)]);
-    out += textBlock(goraC, angle, joined(s.sheet.gora[z.seat]), 13, 30, 3, 'pen');
+    const poolC = avg([lerp(z.P1, O, T1), lerp(z.P2, O, T1), lerp(z.P1, O, T2), lerp(z.P2, O, T2)]);
+    out += textBlock(poolC, angle, joined(s.sheet.pool[z.seat]), 13, 30, 3, 'pen');
 
     for (const h of z.halves) {
       const hc = avg([h.v, M, lerp(M, O, T1), lerp(h.v, O, T1)]);
@@ -867,8 +893,8 @@ function pulyaSVG() {
     }
 
     // Faint band labels only where nothing is written yet.
-    if (!s.sheet.pool[z.seat].length) out += `<text transform="translate(${poolC.x.toFixed(1)} ${poolC.y.toFixed(1)}) rotate(${angle})" class="bandlbl" text-anchor="middle" dominant-baseline="middle">пуля</text>`;
     if (!s.sheet.gora[z.seat].length) out += `<text transform="translate(${goraC.x.toFixed(1)} ${goraC.y.toFixed(1)}) rotate(${angle})" class="bandlbl" text-anchor="middle" dominant-baseline="middle">гора</text>`;
+    if (!s.sheet.pool[z.seat].length) out += `<text transform="translate(${poolC.x.toFixed(1)} ${poolC.y.toFixed(1)}) rotate(${angle})" class="bandlbl" text-anchor="middle" dominant-baseline="middle">пуля</text>`;
   }
 
   // Player names along their own side, outside the triangle.
@@ -901,7 +927,7 @@ function openScore() {
       <div class="meta">${esc(s.variantTitle)} · пуля до ${s.limit} · сдача ${s.dealNo}
         ${s.rules.progressiveRaspas ? ` · распасы ×${s.raspasNext}` : ''}</div>
       ${pulyaSVG()}
-      <div class="meta" style="margin-top:2px">Полосы от центра: пуля · гора · висты
+      <div class="meta" style="margin-top:2px">Полосы от центра: гора · пуля · висты
         (внешняя полоса, на каждого соперника). Записи — нарастающим итогом.</div>
       <table class="totals">
         <tr><th></th><th>Пуля</th><th>Гора</th><th>${s.phase === 'finished' ? 'Итог (висты)' : 'Если закрыть сейчас'}</th></tr>
@@ -956,9 +982,10 @@ function openRules() {
           ? 'разрешён на шестерной и семерной после паса первого вистующего — половина вистов, без розыгрыша.'
           : 'в этой конвенции не используется.'}</li>
         <li><b>Торговля:</b> от 6♠ до 10БК; мизер стоит между 8БК и 9♠ и может быть только первым словом. Старшая рука может держать равную заявку.</li>
-        <li><b>Распасы (розыгрыш):</b> карты прикупа открываются по одной; в первых двух взятках ходом считается карта прикупа — все обязаны класть её масть (при отсутствии — любую), взятку берёт старшая карта масти прикупа.</li>
+        <li><b>Распасы (розыгрыш):</b> карты прикупа открываются по одной; в первых двух взятках ходом считается карта прикупа — все обязаны класть её масть (при отсутствии — любую), взятку берёт старшая карта масти прикупа. Обе талонные взятки и третья разыгрываются от первой руки, и лишь с четвёртой ходит взявший взятку.</li>
         <li><b>Светлая/тёмная:</b> если вистует один, он выбирает: в светлую (карты обоих защитников открываются всем, вистующий ходит и за пасовавшего) или в тёмную. При двух вистующих игра всегда тёмная.</li>
-        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода. Затем вистующие решают, кто руководит ловлей («играю» / «доверяю»): руководящий ходит за обоих, второй наблюдает, и с этого момента все карты открыты всем, включая играющего.</li>
+        <li><b>Мизер:</b> всегда в открытую — карты играющего открываются сразу после сноса, если первый ход не его, иначе после его первого хода; показываются все 12 карт вместе со снесёнными, чтобы снос не был виден. Затем вистующие решают, кто руководит ловлей («играю» / «доверяю»): руководящий ходит за обоих, второй наблюдает, и с этого момента все карты открыты всем, включая играющего.</li>
+        <li><b>Закрытая пуля:</b> когда своя пуля набрана до ${s.limit}, дальнейшие очки пишутся в пулю соперника с наименьшей пулей — по 10 вистов на него за каждое очко; если закрыты все пули, очко списывает собственную гору.</li>
         <li><b>Конец игры:</b> когда каждый закрыл пулю до ${s.limit}, либо когда все трое проголосовали за завершение. Пуля и гора переводятся в висты по 10 за очко относительно среднего по столу; висты сводятся попарно.</li>
       </ul>
       <div class="foot"><button id="closeRules">Закрыть</button></div>

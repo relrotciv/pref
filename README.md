@@ -50,9 +50,9 @@ project, self-hosted in `public/cards/` — no external requests at runtime).
 - Misère: no whisting; the declarer's cards are open to the defenders after the
   first card is played.
 - **Score sheet at any time** — the *Score* button opens a hand-drawn style
-  pulya: the classic triangle where each player owns one side, with the pool
-  band nearest the centre (the limit written in the middle), the mountain band
-  next, and the whist band along the outer edge split per opponent. Entries
+  pulya: the classic triangle where each player owns one side, with the
+  mountain band nearest the centre (the limit written in the middle), the pool
+  band next, and the whist band along the outer edge split per opponent. Entries
   are running dot-separated totals, exactly as recorded on paper. A compact
   totals table with the projected settlement ("if closed now") sits below it.
 - **Pool limit** is set when the table is created; the game ends when every

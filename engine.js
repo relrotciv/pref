@@ -104,7 +104,7 @@ function newGame(id, variant, limit) {
     declarer: -1, contract: null, wonBid: null, wonRank: -1,
     raspasStreak: 0,
     score: { pool: [0, 0, 0], gora: [0, 0, 0], whists: [[0, 0, 0], [0, 0, 0], [0, 0, 0]] },
-    sheet: emptySheet(),
+    sheet: emptySheet(), sheetV: SHEET_V,
     lastWords: ['', '', ''],
     summary: null, result: null,
     endVotes: [false, false, false],
@@ -119,8 +119,12 @@ function err(msg, code) {
   return e;
 }
 
-// The "sheet" mirrors the paper pulya drawing: every entry is recorded as a
-// running total (2.4.6…), one list per band, exactly as written by hand.
+// The "sheet" mirrors the paper pulya drawing: one running total per written
+// game (2.6.10…), one list per band, exactly as written by hand.
+// Sheet version 2: a game's points form a single entry. Version 1 wrote a
+// separate entry for every pool point (1.2.3.4…).
+const SHEET_V = 2;
+
 function emptySheet() {
   return {
     pool: [[], [], []],
@@ -129,26 +133,135 @@ function emptySheet() {
   };
 }
 
-// Games saved before the sheet existed get one synthesized entry per total.
 function ensureSheet(g) {
-  if (g.sheet) return;
-  g.sheet = emptySheet();
-  for (let i = 0; i < 3; i++) {
-    if (g.score.pool[i]) g.sheet.pool[i].push(g.score.pool[i]);
-    if (g.score.gora[i]) g.sheet.gora[i].push(g.score.gora[i]);
-    for (let j = 0; j < 3; j++) {
-      if (g.score.whists[i][j]) g.sheet.whists[i][j].push(g.score.whists[i][j]);
+  if (g.sheet && g.sheetV === SHEET_V) return;
+  if (g.sheet) {
+    // Version 1 sheet: rebuild it from the log, if the log still covers the
+    // whole game and reproduces the score exactly.
+    const rebuilt = sheetFromLog(g);
+    if (rebuilt) g.sheet = rebuilt;
+  } else {
+    // Games saved before the sheet existed get one synthesized entry per total.
+    g.sheet = emptySheet();
+    for (let i = 0; i < 3; i++) {
+      if (g.score.pool[i]) g.sheet.pool[i].push(g.score.pool[i]);
+      if (g.score.gora[i]) g.sheet.gora[i].push(g.score.gora[i]);
+      for (let j = 0; j < 3; j++) {
+        if (g.score.whists[i][j]) g.sheet.whists[i][j].push(g.score.whists[i][j]);
+      }
     }
   }
+  g.sheetV = SHEET_V;
 }
 
+// Replays the scoring lines of the log into a fresh sheet. Returns null when
+// the log is incomplete or the replay does not match the recorded score.
+function sheetFromLog(g) {
+  const names = g.players.map((p) => p.name);
+  // The seat whose name starts the text (longest name wins).
+  const seatAt = (text) => {
+    let best = -1;
+    names.forEach((n, i) => {
+      if (n && text.startsWith(n) && (best < 0 || n.length > names[best].length)) best = i;
+    });
+    return best;
+  };
+  const seatIs = (text) => names.indexOf(text);
+
+  const sheet = emptySheet();
+  const pool = [0, 0, 0];
+  const gora = [0, 0, 0];
+  const wh = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const putPool = (s, n) => { if (n > 0) { pool[s] += n; sheet.pool[s].push(pool[s]); } };
+  const putGora = (s, n) => { if (n !== 0) { gora[s] += n; sheet.gora[s].push(gora[s]); } };
+  const putWh = (s, on, n) => { if (n > 0) { wh[s][on] += n; sheet.whists[s][on].push(wh[s][on]); } };
+
+  // Overflow points of the current deal, logged before its summary lines.
+  let over = [];
+  let burn = [0, 0, 0];
+  let seated = 0;
+  for (const line of g.log) {
+    if (line.includes(' садится за стол')) { seated++; continue; }
+    let m = line.match(/^(.+): пуля закрыта — очко пишется в пулю (.+), \+10 вистов на него$/);
+    if (m) {
+      const a = seatIs(m[1]); const b = seatIs(m[2]);
+      if (a < 0 || b < 0) return null;
+      over.push([a, b]);
+      continue;
+    }
+    m = line.match(/^(.+): пуля закрыта — очков в пулю (.+): (\d+), \+\d+ вистов на него$/);
+    if (m) {
+      const a = seatIs(m[1]); const b = seatIs(m[2]);
+      if (a < 0 || b < 0) return null;
+      for (let k = Number(m[3]); k > 0; k--) over.push([a, b]);
+      continue;
+    }
+    m = line.match(/^(.+): все пули закрыты — очко списывает гору$/);
+    if (m) {
+      const a = seatIs(m[1]);
+      if (a < 0) return null;
+      burn[a]++;
+      continue;
+    }
+    m = line.match(/^(.+): все пули закрыты — очков списано с горы: (\d+)$/);
+    if (m) {
+      const a = seatIs(m[1]);
+      if (a < 0) return null;
+      burn[a] += Number(m[2]);
+      continue;
+    }
+    // Older engine versions wrote both defenders' shortfall on one line:
+    // "…недобрали 1 → +2 в гору (Max), +2 в гору (Victor)".
+    if (line.startsWith('Ответственный вист: вистующие недобрали')) {
+      for (const mm of line.matchAll(/\+(\d+) в гору \((.+?)\)/g)) {
+        const a = seatIs(mm[2]);
+        if (a < 0) return null;
+        putGora(a, Number(mm[1]));
+      }
+      continue;
+    }
+    m = line.match(/\+(\d+) (в пулю|в гору|вистов на (.+))$/);
+    if (!m) continue;
+    const who = seatAt(line.replace(/^(Вистующие спасовали — |Ответственный вист: )/, ''));
+    if (who < 0) return null;
+    const n = Number(m[1]);
+    if (m[2] === 'в пулю') {
+      const mine = over.filter(([a]) => a === who);
+      putPool(who, n - mine.length - burn[who]);
+      for (let b = 0; b < 3; b++) {
+        const k = mine.filter(([, t]) => t === b).length;
+        if (k) { putPool(b, k); putWh(who, b, 10 * k); }
+      }
+      if (burn[who]) putGora(who, -burn[who]);
+      over = over.filter(([a]) => a !== who);
+      burn[who] = 0;
+    } else if (m[2] === 'в гору') {
+      putGora(who, n);
+    } else {
+      const on = seatIs(m[3]);
+      if (on < 0) return null;
+      putWh(who, on, n);
+    }
+  }
+  if (seated !== 3) return null; // the beginning of the game was trimmed away
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  if (!same(pool, g.score.pool) || !same(gora, g.score.gora) || !same(wh, g.score.whists)) return null;
+  return sheet;
+}
+
+// Writes a game's pool points as ONE sheet entry. Points beyond a closed pool
+// go to the opponents' pools (10 whists each) or burn the mountain; every
+// band touched also gets a single entry for the whole game.
 function addPool(g, seat, n) {
   if (n <= 0) return;
   ensureSheet(g);
+  let own = 0;
+  let burned = 0;
+  const over = [0, 0, 0];
   for (let i = 0; i < n; i++) {
     if (g.score.pool[seat] < g.limit) {
       g.score.pool[seat] += 1;
-      g.sheet.pool[seat].push(g.score.pool[seat]);
+      own++;
       continue;
     }
     // Own pool is closed: the point goes into the emptiest open pool of an
@@ -158,15 +271,23 @@ function addPool(g, seat, n) {
       const target = (others.length === 2 && g.score.pool[others[1]] < g.score.pool[others[0]])
         ? others[1] : others[0];
       g.score.pool[target] += 1;
-      g.sheet.pool[target].push(g.score.pool[target]);
-      addWhists(g, seat, target, 10);
-      log(g, `${pname(g, seat)}: пуля закрыта — очко пишется в пулю ${pname(g, target)}, +10 вистов на него`);
+      over[target]++;
     } else if (g.score.gora[seat] > 0) {
       // Every pool is closed: the point burns one's own mountain instead.
       g.score.gora[seat] -= 1;
-      g.sheet.gora[seat].push(g.score.gora[seat]);
-      log(g, `${pname(g, seat)}: все пули закрыты — очко списывает гору`);
+      burned++;
     }
+  }
+  if (own) g.sheet.pool[seat].push(g.score.pool[seat]);
+  for (let t = 0; t < 3; t++) {
+    if (!over[t]) continue;
+    g.sheet.pool[t].push(g.score.pool[t]);
+    addWhists(g, seat, t, 10 * over[t]);
+    log(g, `${pname(g, seat)}: пуля закрыта — очков в пулю ${pname(g, t)}: ${over[t]}, +${10 * over[t]} вистов на него`);
+  }
+  if (burned) {
+    g.sheet.gora[seat].push(g.score.gora[seat]);
+    log(g, `${pname(g, seat)}: все пули закрыты — очков списано с горы: ${burned}`);
   }
 }
 
@@ -954,10 +1075,22 @@ function view(g, seat, connected) {
     }
   }
 
+  // The talon, once turned face up, stays visible to everyone for the rest of
+  // the deal: in full after the declarer took it, and card by card on raspasy.
+  out.openTalon = null;
+  if (['discard', 'whisting', 'lightChoice', 'play', 'hand_end'].includes(g.phase)) {
+    if (g.contract && g.contract.raspas) {
+      const shown = g.phase === 'play' ? Math.min(g.play.done + 1, 2) : 2;
+      out.openTalon = g.talon.slice(0, shown);
+    } else if (g.declarer >= 0) {
+      out.openTalon = g.talon.slice();
+    }
+  }
+
   return out;
 }
 
 module.exports = {
-  VARIANTS, newGame, addPlayer, act, view, startDeal,
+  VARIANTS, newGame, addPlayer, act, view, startDeal, sheetFromLog,
   bidText, cardText, settleTotals,
 };

@@ -461,6 +461,7 @@ function render() {
   renderCenter();
   renderActions();
   renderHand();
+  renderTalonCorner();
   // Light whist: the whister plays the passer's open cards.
   app.querySelectorAll('[data-opencard]').forEach((b) => {
     b.onclick = () => act({ type: 'play', card: b.dataset.opencard });
@@ -525,7 +526,7 @@ function renderCenter() {
       : `<b>${youName(s.lightChoice.turn)}</b> выбирает: в светлую или в тёмную…`}</div>`;
   } else if (s.phase === 'play') {
     html += contractLine;
-    if (s.talon && s.contract && s.contract.raspas) {
+    if (s.talon && s.contract && s.contract.raspas && s.play.done < 2) {
       const active = s.play.done < 2 ? Math.min(s.play.done, 1) : -1;
       html += `<div class="talon"><span class="lbl">Ход из прикупа</span>${s.talon.map((t, i) =>
         cardHTML(t, i === active ? 'talon-active' : '', 'disabled')).join('')}</div>`;
@@ -753,6 +754,50 @@ function renderActions() {
 // ---------------------------------------------------------------------------
 // Hand
 // ---------------------------------------------------------------------------
+
+// Once the talon is turned face up it stays in the bottom-left corner for the
+// rest of the deal, so nobody has to remember it. During the discard it is
+// already shown in the centre.
+function renderTalonCorner() {
+  const s = state;
+  const side = document.getElementById('handSideL');
+  if (!side || !s.openTalon || !s.openTalon.length || s.phase === 'discard') return;
+  side.appendChild(el(`<div class="talon talon-corner"><span class="lbl">Прикуп</span><div class="cards">${
+    s.openTalon.map((t) => cardHTML(t, '', 'disabled')).join('')}</div></div>`));
+  fitTalonCorner();
+}
+
+// Fit the corner talon into the free space between the screen edge and the
+// hand: first pack the hand's cards a little tighter, then shrink the talon.
+const TALON_EDGE = 14;     // distance from the screen edge (matches the CSS)
+const TALON_CLEAR = 14;    // minimum gap to the hand
+const TALON_MIN_W = 46;
+const HAND_OVERLAPS = [0.45, 0.52, 0.58]; // share of a card hidden under the next
+function fitTalonCorner() {
+  const corner = document.querySelector('.talon-corner');
+  const hand = document.getElementById('hand');
+  if (hand) hand.style.removeProperty('--hand-ov');
+  if (!corner) return;
+  corner.style.removeProperty('--talon-w');
+  if (window.innerWidth <= 700) return; // phones: talon has its own line
+  const first = hand && hand.querySelector('.card');
+  if (!first) return; // spectators: the whole bottom row is free
+  const cards = corner.querySelectorAll('.card');
+  const n = cards.length;
+  const gap = 6;
+  const label = corner.querySelector('.lbl').getBoundingClientRect().width;
+  const natural = cards[0].getBoundingClientRect().width;
+  const avail = () => first.getBoundingClientRect().left - TALON_EDGE - TALON_CLEAR;
+  const need = (w) => Math.max(label, n * w + (n - 1) * gap);
+  if (need(natural) <= avail()) return;
+  for (const ov of HAND_OVERLAPS) {
+    hand.style.setProperty('--hand-ov', ov);
+    if (need(natural) <= avail()) return;
+  }
+  const w = Math.max(TALON_MIN_W, Math.min(natural, (avail() - (n - 1) * gap) / n));
+  corner.style.setProperty('--talon-w', `${w}px`);
+}
+window.addEventListener('resize', fitTalonCorner);
 
 function renderHand() {
   const s = state;

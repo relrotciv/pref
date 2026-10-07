@@ -14,10 +14,28 @@ function assert(cond, msg) {
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+const sheetSnap = new WeakMap();
+
 function stepBot(g) {
   // Find whose turn it is from a neutral view, then act with that seat's view.
   for (let seat = 0; seat < 3; seat++) {
     const v = engine.view(g, seat);
+
+    // The revealed talon is public: identical for every seat, hidden while
+    // bidding, complete once the declarer has taken it, and turned one card
+    // per trick on raspasy.
+    if (seat === 0) {
+      const views = [0, 1, 2, -1].map((s) => JSON.stringify(engine.view(g, s).openTalon));
+      assert(views.every((x) => x === views[0]), 'open talon identical for all viewers');
+      if (['lobby', 'bidding', 'finished'].includes(v.phase)) {
+        assert(v.openTalon === null, 'talon hidden outside the deal play');
+      } else if (g.contract && g.contract.raspas) {
+        const n = v.phase === 'play' ? Math.min(g.play.done + 1, 2) : 2;
+        assert(v.openTalon.length === n, 'raspasy talon revealed card by card');
+      } else {
+        assert(v.openTalon && v.openTalon.length === 2, 'declarer talon stays open');
+      }
+    }
 
     if (v.phase === 'bidding' && v.bidding.options) {
       const o = v.bidding.options;
@@ -107,6 +125,21 @@ function stepBot(g) {
         for (let k = 1; k < arr.length; k++) assert(arr[k] !== arr[k - 1], 'mountain entries change');
       }
       assert(S.pool[i] <= g.limit, 'pool never exceeds the limit');
+    }
+    // One written game is one sheet entry: no band list grows by more than
+    // one entry per deal (6 then 7 is written 2.6, not 1.2.3.4.5.6).
+    const prev = sheetSnap.get(g);
+    if (prev) {
+      const lists = (sh) => [...sh.pool, ...sh.gora, ...sh.whists.flat()];
+      const a = lists(prev); const b = lists(g.sheet);
+      b.forEach((l, k) => assert(l.length - a[k].length <= 1, 'one sheet entry per deal'));
+    }
+    sheetSnap.set(g, JSON.parse(JSON.stringify(g.sheet)));
+    // The log replays into exactly the same sheet while it still holds the
+    // whole game (that is how version-1 sheets of saved games are repaired).
+    if (g.log.filter((l) => l.includes(' садится за стол')).length === 3) {
+      const rebuilt = engine.sheetFromLog(g);
+      assert(rebuilt && JSON.stringify(rebuilt) === JSON.stringify(g.sheet), 'sheet rebuilds from log');
     }
     engine.act(g, 0, { type: 'next' });
     return true;

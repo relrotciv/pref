@@ -347,10 +347,22 @@ header .spacer { flex: 1; }
 .hand-side { flex: 1; min-width: 0; display: flex; }
 .hand-side.left { justify-content: flex-end; }
 .hand-side.right { justify-content: flex-start; }
+/* The revealed talon is pinned to the bottom-left corner of the screen.
+   Its card width (--talon-w) is fitted in JS to the free space left of the
+   hand, so it never covers the player's cards. */
+.talon-corner {
+  position: fixed; left: 14px; bottom: 12px; z-index: 5;
+  flex-direction: column; align-items: flex-start; gap: 4px;
+}
+.talon-corner .cards { display: flex; gap: 6px; }
+.talon-corner .card {
+  width: var(--talon-w, calc(var(--card-w) * 0.58));
+  height: calc(var(--talon-w, calc(var(--card-w) * 0.58)) * 1.4124);
+}
 .claim-box { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 
 .hand { display: flex; justify-content: center; flex-wrap: wrap; gap: 0; padding: 26px 0 4px; flex: none; }
-.hand .card { margin-right: calc(var(--card-w) * -0.37); transition: transform .12s; }
+.hand .card { margin-right: calc(var(--card-w) * -1 * var(--hand-ov, 0.37)); transition: transform .12s; }
 .hand .card:last-child { margin-right: 0; }
 button.card { cursor: default; }
 button.card.playable { cursor: pointer; }
@@ -537,6 +549,10 @@ dialog::backdrop { background: rgba(10, 20, 14, .75); }
   .mini-card { width: 36px; }
   .bid-grid { grid-template-columns: repeat(5, 62px); }
   header h1 { letter-spacing: .2em; font-size: 16px; }
+  /* Phones: the talon gets its own line under the hand, still bottom-left. */
+  .hand-row { flex-wrap: wrap; row-gap: 4px; }
+  .hand-side.left:has(.talon-corner) { order: 3; flex: 0 0 100%; padding-left: 8px; }
+  .talon-corner { position: static; flex-direction: row; align-items: center; gap: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

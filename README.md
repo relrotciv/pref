@@ -78,24 +78,9 @@ The server prints its local and LAN addresses (default port 8080), e.g.
 `http://localhost:8080`. Stop it with **Ctrl+C**; running games are saved to
 `data/` and resume after a restart. If macOS or Windows asks whether to allow
 incoming network connections for `node`, allow it if you want players on your
-local network to connect directly (not needed for the Cloudflare tunnel below).
+local network to connect directly (not needed for the Cloudflare tunnel in step 4).
 
-## Playing
-
-Open the URL, choose a convention (Sochi / Piter / Rostov) and the pool limit,
-and press **Deal the cards**. Copy the game link and send it to the other two
-players. The game starts automatically when three players are seated.
-
-- A player's seat is remembered in their browser (localStorage), so closing the
-  tab or losing the connection is harmless — reopening the link resumes the seat.
-- To move a seat to another device, open `.../g/<id>?as=<playerId>` there
-  (the playerId is in the first device's localStorage under `pref:pid:<id>`).
-- Games are also persisted to `data/*.json`, so restarting the server does not
-  lose running games.
-- `node test.js` runs the engine self-test (120 full random games across all
-  three conventions plus targeted scoring checks).
-
-### Playing over the internet (Cloudflare quick tunnel)
+### 4. Playing over the internet (Cloudflare quick tunnel)
 
 The easiest way to let players in other places connect — no router setup, no
 domain, no Cloudflare account — is a free Cloudflare quick tunnel. It gives
@@ -119,7 +104,7 @@ your local server a temporary public `https://` address.
   (other architectures and distributions: see the
   [downloads page](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/))
 
-**2. Start the game server** as above (`node server.js`) and leave it running.
+**2. Start the game server** as in step 3 (`node server.js`) and leave it running.
 
 **3. In a second terminal, start the tunnel:**
 
@@ -139,7 +124,7 @@ Things to know:
 - The address is different every time you start `cloudflared`, and seats are
   remembered per address, so keep the tunnel running for the whole game. If it
   does restart, games are not lost: open the new address with the same
-  `/g/<id>` path, using `?as=<playerId>` to reclaim seats (see above).
+  `/g/<id>` path, using `?as=<playerId>` to reclaim seats (see **Playing** below).
 - Quick tunnels are meant for testing and come with
   [no uptime guarantee](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/);
   Cloudflare also says they do not officially support Server-Sent Events,
@@ -150,6 +135,21 @@ Things to know:
 - Other options work too, since the app is one ordinary HTTP service:
   [Tailscale](https://tailscale.com), or any Linux VPS (behind nginx/caddy for
   HTTPS).
+
+## Playing
+
+Open the URL, choose a convention (Sochi / Piter / Rostov) and the pool limit,
+and press **Deal the cards**. Copy the game link and send it to the other two
+players. The game starts automatically when three players are seated.
+
+- A player's seat is remembered in their browser (localStorage), so closing the
+  tab or losing the connection is harmless — reopening the link resumes the seat.
+- To move a seat to another device, open `.../g/<id>?as=<playerId>` there
+  (the playerId is in the first device's localStorage under `pref:pid:<id>`).
+- Games are also persisted to `data/*.json`, so restarting the server does not
+  lose running games.
+- `node test.js` runs the engine self-test (120 full random games across all
+  three conventions plus targeted scoring checks).
 
 ## Game features
 

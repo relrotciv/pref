@@ -5,9 +5,7 @@ link, and two more players open it in a browser. No accounts, no logins, no
 external services, no npm dependencies — just Node.js.
 
 The interface is in Russian. Card faces are classic English-pattern playing
-cards (Chris Aguilar's LGPL-licensed Vectorized Playing Cards, via the
-[cardsJS](https://github.com/richardschneider/cardsJS) project, self-hosted in
-`public/cards/` — no external requests at runtime).
+cards, self-hosted in `public/cards/` — no external requests at runtime.
 
 ## Installation
 

@@ -4,14 +4,83 @@ A self-hosted web version of Preferans: one player creates a table, shares the
 link, and two more players open it in a browser. No accounts, no logins, no
 external services, no npm dependencies — just Node.js.
 
-## Run
+The interface is in Russian. Card faces are classic English-pattern playing
+cards (Chris Aguilar's LGPL-licensed Vectorized Playing Cards, via the
+[cardsJS](https://github.com/richardschneider/cardsJS) project, self-hosted in
+`public/cards/` — no external requests at runtime).
+
+## Installation
+
+The server needs only [Node.js](https://nodejs.org) 18 or newer — there is
+nothing else to install (`npm install` is not needed).
+
+### 1. Install Node.js
+
+**macOS**
+
+- With [Homebrew](https://brew.sh): `brew install node`
+- Or download the **LTS** installer (`.pkg`) from <https://nodejs.org> and run it.
+
+**Windows**
+
+- In PowerShell: `winget install OpenJS.NodeJS.LTS`
+- Or download the **LTS** installer (`.msi`) from <https://nodejs.org> and run it.
+
+Open a *new* PowerShell window afterwards so `node` is on the PATH.
+
+**Linux**
+
+Distribution packages are often too old, so check first:
 
 ```sh
-node server.js          # or: npm start
+node -v        # needs v18 or newer
 ```
 
-Requires Node.js ≥ 18 (macOS and Linux both fine). The server prints its local
-and LAN URLs, default port 8080 (`PORT=3000 node server.js` to change it).
+If it is missing or older, install the current LTS with
+[nvm](https://github.com/nvm-sh/nvm) (no root needed):
+
+```sh
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+# open a new terminal, then:
+nvm install --lts
+```
+
+### 2. Get the code
+
+With git (macOS and Linux usually have it; on Windows install it with
+`winget install Git.Git`):
+
+```sh
+git clone https://github.com/relrotciv/pref.git
+cd pref
+```
+
+Or download the repository as a ZIP from GitHub (**Code → Download ZIP**),
+unpack it and open a terminal in the unpacked folder.
+
+### 3. Start the server
+
+macOS / Linux:
+
+```sh
+node server.js              # or: npm start
+PORT=3000 node server.js    # a different port
+```
+
+Windows (PowerShell):
+
+```powershell
+node server.js
+$env:PORT=3000; node server.js    # a different port
+```
+
+The server prints its local and LAN addresses (default port 8080), e.g.
+`http://localhost:8080`. Stop it with **Ctrl+C**; running games are saved to
+`data/` and resume after a restart. If macOS or Windows asks whether to allow
+incoming network connections for `node`, allow it if you want players on your
+local network to connect directly (not needed for the Cloudflare tunnel below).
+
+## Playing
 
 Open the URL, choose a convention (Sochi / Piter / Rostov) and the pool limit,
 and press **Deal the cards**. Copy the game link and send it to the other two
@@ -26,16 +95,61 @@ players. The game starts automatically when three players are seated.
 - `node test.js` runs the engine self-test (120 full random games across all
   three conventions plus targeted scoring checks).
 
-### Playing over the internet
+### Playing over the internet (Cloudflare quick tunnel)
 
-The server binds a plain HTTP port, so for three players in different places
-either forward the port on your router, run it on any Linux VPS
-(`node server.js` behind nginx/caddy if you want HTTPS), or use something like
-Tailscale — any option works, the app is a single ordinary HTTP service.
+The easiest way to let players in other places connect — no router setup, no
+domain, no Cloudflare account — is a free Cloudflare quick tunnel. It gives
+your local server a temporary public `https://` address.
 
-The interface is in Russian. Card faces are classic English-pattern playing
-cards (SVGs from the MIT-licensed [cardsJS](https://github.com/richardschneider/cardsJS)
-project, self-hosted in `public/cards/` — no external requests at runtime).
+**1. Install `cloudflared`** (on the same computer as the server):
+
+- macOS: `brew install cloudflared`
+- Windows: `winget install --id Cloudflare.cloudflared`, or the
+  `cloudflared-windows-amd64.msi` installer from the
+  [cloudflared releases page](https://github.com/cloudflare/cloudflared/releases/latest)
+- Debian / Ubuntu:
+  ```sh
+  curl -LO https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+  sudo dpkg -i cloudflared-linux-amd64.deb
+  ```
+- Fedora / RHEL:
+  ```sh
+  sudo rpm -i https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+  ```
+  (other architectures and distributions: see the
+  [downloads page](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/))
+
+**2. Start the game server** as above (`node server.js`) and leave it running.
+
+**3. In a second terminal, start the tunnel:**
+
+```sh
+cloudflared tunnel --url http://localhost:8080
+```
+
+(use your port if you changed it). After a few seconds it prints an address
+like `https://some-random-words.trycloudflare.com`.
+
+**4. Open that `trycloudflare.com` address yourself** — not `localhost` — and
+create the table there. The game link you copy then points to the public
+address, and the other two players can open it from anywhere.
+
+Things to know:
+
+- The address is different every time you start `cloudflared`, and seats are
+  remembered per address, so keep the tunnel running for the whole game. If it
+  does restart, games are not lost: open the new address with the same
+  `/g/<id>` path, using `?as=<playerId>` to reclaim seats (see above).
+- Quick tunnels are meant for testing and come with
+  [no uptime guarantee](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/);
+  Cloudflare also says they do not officially support Server-Sent Events,
+  which the game uses for live updates. It has worked fine in practice, but if
+  moves ever stop appearing for other players, a
+  [named tunnel](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/)
+  on your own domain (free Cloudflare account) is the permanent alternative.
+- Other options work too, since the app is one ordinary HTTP service:
+  [Tailscale](https://tailscale.com), or any Linux VPS (behind nginx/caddy for
+  HTTPS).
 
 ## Game features
 
@@ -89,7 +203,27 @@ whister, no "without talon" declarations, and the discard is never revealed.
 server.js       HTTP + SSE server (zero dependencies)
 engine.js       game rules, scoring, per-player views
 public/         browser client (vanilla HTML/CSS/JS)
-public/cards/   card face SVGs (cardsJS, MIT)
+public/cards/   card face SVGs (Vectorized Playing Cards, LGPL-3.0)
 test.js         engine self-test
 data/           persisted games (created at runtime)
+LICENSE         PolyForm Noncommercial 1.0.0
 ```
+
+## License
+
+Copyright (c) 2026 Victor Erukhimov. All rights reserved.
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): free to
+use, modify and share for any noncommercial purpose (personal use, hobby
+games, education, charities and similar). Commercial use requires a separate
+license from the author.
+
+The card face artwork in `public/cards/` is not covered by this license. It is
+Vectorized Playing Cards 1.3, Copyright 2011 Chris Aguilar, licensed under the
+GNU LGPL v3 (obtained via cardsJS, Copyright 2015 Richard Schneider, MIT); see
+[`public/cards/NOTICE.txt`](public/cards/NOTICE.txt).
+
+## Acknowledgements
+
+The author is grateful to Maxim Nikulin and Alexander Porshnev for their help
+in shaping the user interface and for extensive testing.

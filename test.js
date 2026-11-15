@@ -458,6 +458,41 @@ for (const variant of ['sochi', 'piter', 'rostov']) {
   assert(g.score.whists[2][1] === 4, 'whister A writes whists for his two tricks');
 }
 
+// Targeted scenario: responsible whist with two whisters follows the
+// Preferans Code — no mountain when together they took the requirement; on
+// 8 and 9 the single required trick is the second whister's.
+{
+  // Score a played contract directly: declarer seat 1, whisters 2 then 0.
+  const score = (level, tricks) => {
+    const g = engine.newGame('test11', 'rostov', 20);
+    engine.addPlayer(g, 'A', 'p1');
+    engine.addPlayer(g, 'B', 'p2');
+    engine.addPlayer(g, 'C', 'p3');
+    g.declarer = 1;
+    g.contract = { level, suit: 's' };
+    g.whisting = { order: [2, 0], idx: 2, decisions: { 2: 'whist', 0: 'whist' } };
+    g.play = { tricks, done: 10, trick: [] };
+    engine._scoreContract(g);
+    return g.score;
+  };
+  let S = score(6, [1, 6, 3]);
+  assert(S.gora[0] === 0 && S.gora[2] === 0, 'six: 3+1 meets the requirement, no mountain');
+  S = score(7, [2, 8, 0]);
+  assert(S.gora[0] === 0 && S.gora[2] === 0, 'seven: 0+2 meets the requirement, no mountain');
+  S = score(6, [1, 7, 2]);
+  assert(S.gora[0] === 2 && S.gora[2] === 0, 'six: 2+1 — only the whister short of 2 pays');
+  S = score(6, [1, 8, 1]);
+  assert(S.gora[0] === 2 && S.gora[2] === 2, 'six: 1+1 — both whisters pay one trick each');
+  S = score(7, [0, 9, 1]);
+  assert(S.gora[0] === 4 && S.gora[2] === 0, 'seven: 1+0 — the whister without his trick pays');
+  S = score(8, [0, 10, 0]);
+  assert(S.gora[0] === 6 && S.gora[2] === 0, 'eight: the second whister answers for the trick');
+  S = score(9, [0, 10, 0]);
+  assert(S.gora[0] === 8 && S.gora[2] === 0, 'nine: the second whister answers for the trick');
+  S = score(8, [0, 9, 1]);
+  assert(S.gora[0] === 0 && S.gora[2] === 0, 'eight: first whister took the trick, no mountain');
+}
+
 // Targeted scenario: a closed pool writes into the opponents' pools for whists.
 {
   const g = engine.newGame('test10', 'sochi', 2);

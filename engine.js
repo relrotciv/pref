@@ -820,10 +820,12 @@ function scoreContract(g) {
           addGora(g, whisters[0], short * cost);
           lines.push(`Ответственный вист: ${pname(g, whisters[0])} недобрал ${short} → +${short * cost} в гору`);
         }
-      } else {
-        // Two whisters: the obligation splits evenly (the odd trick, if any,
-        // falls on the first whister) and each answers only for his own share.
-        const oblig = [Math.ceil(need / 2), Math.floor(need / 2)];
+      } else if (defTricks < need) {
+        // Two whisters (Preferans Code): only when together they fell short of
+        // the requirement does each whister who took less than his share write
+        // the shortfall to the mountain. The requirement splits evenly; on 8
+        // and 9 the single trick is the second whister's responsibility.
+        const oblig = [Math.floor(need / 2), Math.ceil(need / 2)];
         whisters.forEach((s, i) => {
           const short = oblig[i] - g.play.tricks[s];
           if (short > 0) {
@@ -1092,5 +1094,6 @@ function view(g, seat, connected) {
 
 module.exports = {
   VARIANTS, newGame, addPlayer, act, view, startDeal, sheetFromLog,
+  _scoreContract: scoreContract, // for the self-test
   bidText, cardText, settleTotals,
 };

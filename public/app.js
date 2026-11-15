@@ -429,7 +429,7 @@ function render() {
       <button class="hbtn" id="btnCopy">Ссылка</button>
     </header>
     <div class="table-wrap">
-      <div class="opponents">${seatPanel(seats.left)}${seatPanel(seats.right)}</div>
+      <div class="opponents">${seatPanel(seats.left)}<div class="table-info" id="info"></div>${seatPanel(seats.right)}</div>
       <div class="middle${Object.keys(s.openHands || {}).length >= 2 ? ' two-open' : ''}">
         <div class="side left">${openHandBlock(seats.left)}</div>
         <div class="center" id="center"></div>
@@ -483,6 +483,9 @@ function renderCenter() {
   const turn = currentTurn();
   const yourTurn = turn === s.you;
   let html = '';
+  // Contract, whose move and the last trick live in the strip between the
+  // opponents' panels, so the player's own cards can never cover them.
+  let info = '';
 
   const contractLine = s.contractText
     ? `<div class="contract-line">${s.declarer >= 0 ? `${youName(s.declarer)} ${isYou(s.declarer) ? 'играете' : 'играет'}` : ''} <b>${esc(s.contractText)}</b>${trumpNote()}</div>`
@@ -494,19 +497,18 @@ function renderCenter() {
         <button class="hbtn" id="shareBtn">Копировать</button></div>
       <div class="hint">Отправьте эту ссылку двум партнёрам. Регистрация не нужна.</div>`;
   } else if (s.phase === 'bidding') {
-    html += `<div class="status${yourTurn ? ' me-turn' : ''}">${yourTurn
+    info += `<div class="status${yourTurn ? ' me-turn' : ''}">${yourTurn
       ? '<b>Ваше слово.</b> Заявка или пас.'
       : `Торговля — слово за <b>${youName(turn)}</b>`}</div>`;
-    html += firstLeadLine();
+    info += firstLeadLine();
   } else if (s.phase === 'discard') {
-    html += contractLine;
-    html += `<div class="talon"><span class="lbl">Прикуп</span>${s.talon.map((t) => cardHTML(t, '', 'disabled')).join('')}</div>`;
-    html += `<div class="status${isYou(s.declarer) ? ' me-turn' : ''}">${isYou(s.declarer)
+    info += contractLine;
+    info += `<div class="status${isYou(s.declarer) ? ' me-turn' : ''}">${isYou(s.declarer)
       ? '<b>Выберите две карты</b> в снос, объявите игру и подтвердите.'
       : `<b>${youName(s.declarer)}</b> выбирает снос и объявляет игру…`}</div>`;
-    html += firstLeadLine();
+    info += firstLeadLine();
   } else if (s.phase === 'whisting') {
-    html += contractLine;
+    info += contractLine;
     let whistStatus;
     if (s.whisting.reWhist) {
       whistStatus = yourTurn
@@ -517,15 +519,15 @@ function renderCenter() {
         ? `<b>Ваше слово:</b> вист или пас? (вистующим положено взяток: ${s.whisting.need})`
         : `Ждём слова <b>${youName(turn)}</b>`;
     }
-    html += `<div class="status${yourTurn ? ' me-turn' : ''}">${whistStatus}</div>`;
-    html += firstLeadLine();
+    info += `<div class="status${yourTurn ? ' me-turn' : ''}">${whistStatus}</div>`;
+    info += firstLeadLine();
   } else if (s.phase === 'lightChoice') {
-    html += contractLine;
-    html += `<div class="status${s.lightChoice.yours ? ' me-turn' : ''}">${s.lightChoice.yours
+    info += contractLine;
+    info += `<div class="status${s.lightChoice.yours ? ' me-turn' : ''}">${s.lightChoice.yours
       ? '<b>Вы вистуете один.</b> Играть в светлую (карты защитников открываются, вы ходите за обоих) или в тёмную?'
       : `<b>${youName(s.lightChoice.turn)}</b> выбирает: в светлую или в тёмную…`}</div>`;
   } else if (s.phase === 'play') {
-    html += contractLine;
+    info += contractLine;
     if (s.talon && s.contract && s.contract.raspas && s.play.done < 2) {
       const active = s.play.done < 2 ? Math.min(s.play.done, 1) : -1;
       html += `<div class="talon"><span class="lbl">Ход из прикупа</span>${s.talon.map((t, i) =>
@@ -569,21 +571,22 @@ function renderCenter() {
       || (s.claim && s.claim.yourReply)
       || (s.play.actingFor !== null && s.play.actingFor !== undefined)
       || (!s.misereRoles && !s.claim && yourTurn && !!s.play.legal));
-    html += `<div class="status${myAction ? ' me-turn' : ''}">${playStatus}</div>`;
-    if (s.play.lastTrick) {
-      html += `<div class="last-trick">Прошлая взятка: ${s.play.lastTrick.cards.map((x) => miniCard(x.card)).join(' ')}
-        — ${youName(s.play.lastTrick.winner)}</div>`;
-    }
+    const last = s.play.lastTrick
+      ? `<div class="last-trick">Прошлая взятка: ${s.play.lastTrick.cards.map((x) => miniCard(x.card)).join(' ')}
+        — ${youName(s.play.lastTrick.winner)}</div>`
+      : '';
+    info += `<div class="info-row"><div class="status${myAction ? ' me-turn' : ''}">${playStatus}</div>${last}</div>`;
   } else if (s.phase === 'hand_end') {
     html += `<div class="summary-panel">
       <div class="t">Сдача ${s.summary.deal}</div>
       ${s.summary.lines.map((l) => `<div>${esc(l)}</div>`).join('')}
     </div>`;
   } else if (s.phase === 'finished') {
-    html += `<div class="status"><b>Игра окончена.</b> Итог — в пуле.</div>`;
+    info += `<div class="status"><b>Игра окончена.</b> Итог — в пуле.</div>`;
   }
 
   c.innerHTML = html;
+  document.getElementById('info').innerHTML = info;
   const sb = document.getElementById('shareBtn');
   if (sb) sb.onclick = () => navigator.clipboard.writeText(location.href).then(() => toast('Ссылка скопирована'));
 }
@@ -756,12 +759,11 @@ function renderActions() {
 // ---------------------------------------------------------------------------
 
 // Once the talon is turned face up it stays in the bottom-left corner for the
-// rest of the deal, so nobody has to remember it. During the discard it is
-// already shown in the centre.
+// rest of the deal, so nobody has to remember it.
 function renderTalonCorner() {
   const s = state;
   const side = document.getElementById('handSideL');
-  if (!side || !s.openTalon || !s.openTalon.length || s.phase === 'discard') return;
+  if (!side || !s.openTalon || !s.openTalon.length) return;
   side.appendChild(el(`<div class="talon talon-corner"><span class="lbl">Прикуп</span><div class="cards">${
     s.openTalon.map((t) => cardHTML(t, '', 'disabled')).join('')}</div></div>`));
   fitTalonCorner();

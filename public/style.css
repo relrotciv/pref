@@ -169,7 +169,15 @@ header .spacer { flex: 1; }
   flex-direction: column;
 }
 
-.opponents { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; flex: none; }
+.opponents { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 4px; flex: none; }
+/* Between the opponents: contract, whose move, the last trick. */
+.table-info {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  text-align: center;
+}
+.info-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 22px; }
+.table-info .mini-card { width: 40px; }
 
 .seat {
   border: 1px solid var(--felt-line);
@@ -542,7 +550,8 @@ dialog::backdrop { background: rgba(10, 20, 14, .75); }
 @media (max-width: 700px) {
   :root { --card-h: min(150px, 20vh); }
   body.in-game { height: auto; overflow: auto; } /* phones: allow scrolling */
-  .opponents { flex-direction: row; }
+  .opponents { flex-direction: row; flex-wrap: wrap; }
+  .table-info { order: 3; flex: 0 0 100%; }
   .seat { min-width: 0; flex: 1; padding: 6px 8px; }
   .seat .nm { font-size: 14px; }
   .hand .card { margin-right: calc(var(--card-w) * -0.62); }
